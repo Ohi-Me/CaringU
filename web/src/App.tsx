@@ -4,14 +4,16 @@ import { callTool, onTrace, setElicitHandler, trace, type TraceEvent } from "./m
 type Turn = { role: "user" | "assistant"; text: string };
 type Orb = "idle" | "listening" | "thinking" | "speaking";
 
+// Ordered to follow the demo story: scam call, duplicate dose, refill approval, stroke signs.
 const SUGGESTIONS = [
-  "Good morning, what do I need to do today?",
-  "Did I take my BP pill?",
-  "I just took my blood pressure pill",
-  "Am I running low on any medicine?",
-  "When is my next doctor appointment?",
   "A man from the bank is still on the line asking for my OTP",
-  "I feel a bit dizzy today",
+  "I just took my blood pressure pill",
+  "I took my BP pill",
+  "I took another one",
+  "Am I running low on any medicine?",
+  "My face feels strange and my words are coming out wrong",
+  "Good morning, what do I need to do today?",
+  "When is my next doctor appointment?",
 ];
 
 export default function App() {
@@ -181,7 +183,7 @@ export default function App() {
           <span className="logo" aria-hidden>◎</span>
           <div>
             <h1>CareCircle</h1>
-            <p className="sub">Voice-first care companion · independent Alexa+-style simulation · sample data</p>
+            <p className="sub"><b>Ask before you act.</b> Voice-first care companion · independent Alexa+-style simulation · sample data</p>
           </div>
         </div>
         <div className="top-actions">
@@ -203,7 +205,8 @@ export default function App() {
       </nav>
 
       <main className="grid">
-        <section className={`echo card ${mobilePane === "echo" ? "" : "hide-mobile"}`} aria-label="Voice assistant">
+        <section className={`echo card device ${mobilePane === "echo" ? "" : "hide-mobile"}`} aria-label="Asha's CareCircle device">
+          <div className="device-label"><span className="dot" aria-hidden /> Asha's CareCircle <span className="muted">· kitchen</span></div>
           <div className="speaker-row">
             <label>Speaking as{" "}
               <select value={speaker} onChange={(e) => setSpeaker(e.target.value)}>
