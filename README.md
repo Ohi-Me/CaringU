@@ -1,134 +1,143 @@
 # CareCircle
 
-**A voice-first care companion for older adults who live alone, and the family who worry about them.**
-Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ track (self-hosted MCP server + simulated Alexa+-style experience).
+**Ask before you act.** CareCircle is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a fall) and brings the family in, fast.
 
-> "Did I take my BP pill?" is one of the most common questions an older person asks, and one of the most dangerous to get wrong.
+Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ track: a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) plus a simulated Alexa+-style experience whose web clients are real MCP clients.
 
 ## The problem
 
-- Older adults on several medicines regularly **miss doses or take a dose twice** because they can't remember whether they already did. Double-dosing blood-pressure or diabetes medicine can cause falls and hospital visits.
-- Medicines **run out** before anyone notices.
-- **Phone scams** (fake bank or KYC calls, "digital arrest", requests for OTP codes or AnyDesk) target older people first.
-- Family members living in another city only find out **after** something has gone wrong.
+- Older adults on several medicines often can't remember whether they already took a dose, so they **miss doses or take one twice**.
+- **Phone scams** target them first: fake bank or KYC calls, "digital arrest", "your grandson is in jail", requests for OTP codes or AnyDesk.
+- **Falls and stroke signs** need someone to act within minutes, but family members often live in another city and find out late.
+- Many older people won't use an app. They will talk.
 
-Apps don't fix this, because many older people won't use a phone app. They will talk.
+## The experience
 
-## What CareCircle does
-
-The older person talks to an Alexa+-style assistant. The family see a live dashboard. Everything in between runs through **real MCP tools** that read and change persistent state.
-
-| Asha says… | CareCircle does (real MCP tool calls) |
+| Asha says… | What happens (real MCP tool calls) |
 |---|---|
-| "Did I take my BP pill?" | `check_dose_status`: reads the dose log and says whether another dose is safe now |
-| "I just took my blood pressure pill" | `record_dose`: records it, decrements stock, warns when supply is low |
-| "I took my BP pill" (again) | `record_dose` **refuses** with `DOUBLE_DOSE_RISK`, tells her not to take it, alerts the family |
-| "Am I running low on anything?" | `forecast_refills` → `request_refill` **proposes** a refill → asks "Shall I go ahead?" → `confirm_action` only after "yes" |
-| "When is my doctor appointment?" | `list_appointments`: notices **no ride is arranged** and offers to message the family (`notify_family`) |
-| "A man from the bank wants my OTP and says install AnyDesk" | `assess_scam_risk`: flags it as a likely scam, tells her what not to do, alerts the family |
-| "I feel dizzy and have chest pain" | `log_wellbeing`: red-flag triage, **urgent** family alert, "call 112 now". It never diagnoses |
-| Ravi (son): "How is mom doing today?" | `get_family_digest`: adherence, missed doses, alerts, refills, appointments |
+| "A man from the bank is still on the line asking for my OTP" | The safety screen flags a likely scam, and `assess_scam_risk` records it. She hears **"Hang up now"** and why. **Ravi** gets an urgent alert. If he doesn't respond in 3 minutes, it **escalates to Neha**; if nobody responds, her device tells her to call 112. |
+| *(Ravi taps "I'm calling her now" or a quick reply)* | `respond_to_alert` stops the escalation, and her device **reads Ravi's message aloud** (`get_announcements`). |
+| "I took my BP pill" (already recorded at 9:05) | `record_dose` changes nothing and asks: *"Is that the dose you mean, or did you take another one just now?"* If it was **another**: the dose is recorded as extra, the family gets an **urgent** alert, and she is told to call her pharmacist (or 112 if she feels faint). |
+| "Should I take my blood pressure tablet?" | `check_dose_status` reports **what is recorded**. It never says a dose is "safe", and it suggests checking her pill organiser or asking the pharmacist. |
+| "My face feels strange and my words are coming out wrong" | Stroke signs are caught deterministically: `log_wellbeing` sends an urgent alert, and the reply starts with **"Please call 112 now."** |
+| "I'm running low on my BP pills" | `request_refill`: the **MCP server asks her directly** ("Send a refill request for 30 × Amlodipine…?"), by voice or with Yes/No buttons. The refill runs only if she says yes. |
+| Ravi: "Any problems with mom today?" | `get_family_digest`: doses taken and missed, alerts, refills, appointments, and whether a ride is arranged. |
 
-The family dashboard (same page, right-hand side or the *Family* tab on a phone) shows today's medicine timeline, alerts with a "Handled" button, actions waiting for approval, refills, appointments and how she's feeling. It reads and writes **through the same MCP server, directly from the browser**.
+The family dashboard (right side, or the *Family* tab on a phone) is a second MCP client running in the browser. It shows live alerts with the escalation chain and timeline, response buttons, today's medicine timeline, approvals, refills, appointments and messages sent to her device.
 
-### Design principles
+## What makes it trustworthy
 
-1. **Facts come from tools, never from the model.** Every safety rule (dose gaps, red-flag triage, scam scoring, confirmation) is deterministic code in [`server/src/care.ts`](server/src/care.ts). The model only chooses which tool to call.
-2. **Propose, then confirm.** Refills, new appointments and cancellations return a `confirmation_id`. Nothing happens until `confirm_action`, which is idempotent (a second "yes" can't send a second refill).
-3. **Honest failure.** Tool errors have a consistent shape `{code, message, retryable, details}`. The UI shows failed calls in red. If Bedrock fails, the agent says so and falls back to the rule-based planner; it never fakes an answer.
-4. **Escalate, don't diagnose.** Red-flag symptoms always alert the family and point to emergency services.
-5. **Transparent.** A live **MCP trace** tab shows every JSON-RPC message with its latency and payload, and the server keeps an audit log (long free text is truncated).
+1. **Safety does not depend on the AI.** Every message first passes a deterministic **safety screen** ([`safety.ts`](server/src/safety.ts), [`screen.ts`](server/src/screen.ts)):
+   - Symptom triage handles negation and third-party mentions ("I don't have chest pain", "my friend fell"). Its rules follow public first-aid red flags: FAST stroke signs, chest pain, breathing trouble, collapse, falls with injury, low-sugar confusion.
+   - The scam screen follows the common scam playbook (credential requests, gift cards or crypto, remote-access apps, authority plus threat, family emergency plus money, secrecy). It also recognises legitimate notices, such as a bank telling you to call the number on your card, so they don't trigger alarms.
+   - When the screen fires, the MCP tool runs and the emergency or scam instruction is guaranteed to be in the reply, whatever the agent does.
+2. **Approvals are enforced by the protocol, not the prompt.** Refills and appointment changes use **MCP elicitation**: the server sends `elicitation/create` on the SSE stream of the in-flight `tools/call`, and the person answers on their device or dashboard. The language model never sees or produces the approval. Clients without elicitation fall back to a two-step `confirmation_id` → `confirm_action` flow, behind a deterministic guard that blocks the model from approving anything unless the user's latest message says yes.
+3. **Honest about uncertainty.** Medication answers say what is *recorded*, never that a dose is *safe*. Missed doses go to the pharmacist. Tool errors are structured (`code`, `message`, `retryable`) and shown in red in the trace. If Bedrock fails, the trace says so and the rule-based planner answers instead.
+4. **Family in the loop, with a deadline.** Urgent alerts follow an escalation ladder (Ravi → Neha → tell her to call 112), driven by a reproducible clock and fully tested.
+5. **Transparent.** The **MCP trace** tab shows every JSON-RPC step: initialize, tools/list, each tools/call with its latency, the safety screen verdict, elicitation questions and answers, and guard blocks. The server keeps an audit log (long free text is truncated).
 
 ## Alexa+ track: what is real and what is simulated
 
 | | Status |
 |---|---|
-| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `POST /mcp` (stateless JSON responses) |
-| MCP clients | **Real.** (1) The agent connects as an MCP client and sends `initialize`, `tools/list` and `tools/call` over Streamable HTTP. (2) The family dashboard is an MCP client running in the browser. |
-| Tools and state | **Real.** 16 validated tools backed by SQLite. Changes persist across reloads. |
-| Agent | Amazon Bedrock Converse API with tool use (`BEDROCK_MODEL_ID`, default Amazon Nova Pro), or a transparent rule-based planner when no AWS credentials are configured |
-| Voice | Browser Web Speech API (speech recognition and synthesis; Chrome or Edge) |
-| Alexa / Echo | **Simulated.** This is an independent Alexa+-*style* web experience. It is **not** connected to Alexa, an Echo device or the gated Alexa+ developer tools, which the hackathon FAQ says are not available to participants. |
-| People, medicines, pharmacy | **Sample data only** (fictional people). The "pharmacy" refill and family "delivery" go to the dashboard; no SMS, no orders, no payments. |
+| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 20 tools. |
+| MCP clients | **Real.** (1) The agent (server side) runs `initialize`, `tools/list` and `tools/call`, and handles elicitation by relaying questions to the device. (2) The family dashboard is an MCP client in the browser with its own elicitation handler. |
+| State | **Real.** SQLite (Node's built-in `node:sqlite`). Changes persist and are verified by re-reading. |
+| Agent | **Amazon Bedrock** Converse API with tool use (default `amazon.nova-pro-v1:0`), or a transparent rule-based planner when no AWS credentials are configured |
+| Voice | Browser Web Speech API (speech recognition and synthesis, Chrome or Edge) |
+| Alexa / Echo | **Simulated.** An independent Alexa+-*style* web experience. **Not** connected to Alexa, an Echo device or the gated Alexa+ developer tools, which the FAQ says are not available to participants. |
+| People, pharmacy, notifications | **Sample data** (fictional people). Refills go to a simulated pharmacy. Family alerts and replies travel through the CareCircle dashboard and device; there is no SMS. No orders and no payments. |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   subgraph Browser
-    V[Voice UI<br/>Web Speech API] -->|POST /api/agent/chat| A
-    D[Family dashboard<br/>MCP client in browser] -->|initialize / tools/list / tools/call| M
+    V["Her device<br/>voice UI + yes/no prompts"] -->|POST /api/agent/chat · NDJSON stream| A
+    V -->|answers: POST /api/agent/elicit/:id| A
+    D["Family dashboard<br/>MCP client + elicitation handler"] <-->|Streamable HTTP session| M
   end
-  subgraph Server [Node.js container]
-    A[Agent<br/>Bedrock Converse tool use<br/>or rule planner] -->|MCP client<br/>Streamable HTTP| M[MCP server /mcp<br/>16 tools, zod-validated]
-    M --> C[care.ts<br/>safety rules, deterministic]
+  subgraph Server ["Node.js server"]
+    A["Orchestrator<br/>1 safety screen<br/>2 Bedrock (Nova Pro) or rule planner<br/>3 confirmation guard"] <-->|MCP client · Streamable HTTP session| M["MCP server /mcp<br/>20 zod-validated tools<br/>elicitation for approvals"]
+    M --> C["care.ts · safety.ts · family.ts<br/>deterministic rules"]
     C --> DB[(SQLite)]
     A -.->|Converse API| B[(Amazon Bedrock)]
   end
 ```
 
-The agent streams every step (MCP handshake, each tool call and result, model steps) to the browser as NDJSON, so the trace you see is the real one.
+### MCP tools (20)
 
-### MCP tools
+| Area | Tools |
+|---|---|
+| Medicines | `get_care_overview`, `list_medications`, `check_dose_status`, `record_dose`, `forecast_refills`, `request_refill`† |
+| Appointments | `list_appointments`, `schedule_appointment`†, `cancel_appointment`† |
+| Approvals | `confirm_action` (fallback for clients without elicitation) |
+| Safety | `log_wellbeing`, `assess_scam_risk` |
+| Family loop | `notify_family`, `list_alerts`, `acknowledge_alert`, `respond_to_alert`, `send_message_to_elder`, `get_announcements`, `mark_announcements_heard`, `get_family_digest` |
 
-`get_care_overview`, `list_medications`, `check_dose_status`, `record_dose`, `forecast_refills`, `request_refill`*, `list_appointments`, `schedule_appointment`*, `cancel_appointment`*, `confirm_action`, `log_wellbeing`, `assess_scam_risk`, `notify_family`, `list_alerts`, `acknowledge_alert`, `get_family_digest`
-
-\* Proposal only; it needs `confirm_action`. Read-only tools carry `readOnlyHint`, and `cancel_appointment` carries `destructiveHint`.
+† Approved by a human through MCP elicitation, or through `confirm_action` for clients that can't elicit.
 
 ## Run it locally
 
-Requires **Node.js 22.13+** (uses the built-in `node:sqlite`; developed on Node 24).
+Requires **Node.js 22.13+** (built-in `node:sqlite`; developed on Node 24).
 
 ```bash
 cd web && npm install && npm run build && cd ..
 cd server && npm install && npm start
 ```
 
-Open http://localhost:8787. Use **Reset demo (10:00)** to start a reproducible demo morning (one dose due, low Amlodipine stock, cardiology appointment tomorrow with no ride arranged).
-
-Front-end development with hot reload: run `npm start` in `server/`, then `npm run dev` in `web/` (Vite proxies `/mcp` and `/api`).
+Open http://localhost:8787.
+- **Reset demo (10:00)** starts a reproducible morning: one dose due, low Amlodipine stock, and a cardiology appointment tomorrow with no ride arranged.
+- **+3 min** moves the demo clock forward so you can watch an alert escalate.
 
 ### Use Amazon Bedrock
 
-1. In the AWS console, enable model access for the model you want (default `amazon.nova-pro-v1:0`, region `us-east-1`).
-2. Make credentials available the standard way (`aws configure`, `AWS_PROFILE`, or an IAM role when deployed). Never commit keys.
-3. Optionally copy `.env.example` to `.env` and set `AGENT_MODE=bedrock` or `BEDROCK_MODEL_ID`.
+1. Use a least-privilege identity, not the root account. The policy only needs `bedrock:InvokeModel` on `arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0`.
+2. Configure that identity as a profile, for example `aws configure --profile carecircle-dev`.
+3. Copy `.env.example` to `.env` and set `AWS_PROFILE=carecircle-dev` and `AGENT_MODE=bedrock`.
 
-The header badge shows which agent is active. If a Bedrock call fails, the trace shows a warning and the reply comes from the rule planner instead.
+The header badge shows which agent is active.
 
 ### Connect any MCP client
 
 ```bash
-curl -s -X POST http://localhost:8787/mcp \
+curl -si -X POST http://localhost:8787/mcp \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 ```
+
+Use the returned `Mcp-Session-Id` header on later requests. Declare `"capabilities":{"elicitation":{"form":{}}}` to receive approval prompts.
 
 ## Tests and evaluation
 
 ```bash
 cd server
-npm test        # 11 domain tests + 6 protocol tests (raw JSON-RPC and SDK client against a live server)
-npm run eval    # 30 end-to-end conversations through agent -> MCP -> SQLite (server must be running)
+npm test          # 29 tests: domain rules, safety screens, escalation ladder, raw JSON-RPC + sessions, SDK client, elicitation round-trips
+npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (server running)
+npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)
 ```
 
-`npm run eval` resets the demo to 10:00 before each case and writes [`docs/evaluation-rules.md`](docs/evaluation-rules.md) or `docs/evaluation-bedrock.md`, depending on the active agent. Categories: basic requests, double-dose safety, confirmation gate, symptoms, scams, ambiguity and robustness.
+| Held-out measure (rule-based agent) | Baseline | After safety rework |
+|---|---|---|
+| Scam recall · false alarms on legitimate look-alikes | 45% · 10% | 100% · 0% |
+| Symptom triage accuracy · urgent recall · false emergencies | 40% · 50% · 2/8 | 97% · 100% · 0/8 |
+| End-to-end conversations | 7/24 | 24/24 |
 
-Note: the rule-based planner was developed against these same 30 cases, so its score shows the plumbing and safety rules work, not that it understands language in general. The Bedrock run is the meaningful language-understanding result.
+**Read these numbers with care.** The held-out sets were frozen before the rework ([baseline report](docs/heldout-baseline-rules.md)), but their failures were seen during development, so the "after" figures are optimistic. A blind set written by someone else is the next step, along with the same runs against Bedrock.
 
 ## Privacy and safety
 
 - All people and data are fictional sample data. There is no real calendar, pharmacy, SMS or health record.
-- CareCircle is **not a medical device** and gives no medical advice. In an emergency, call 112 (India) or 911 (US).
-- The audit log truncates long free text. Secrets are read from the environment only.
+- CareCircle is **not a medical device**. It gives no medical advice, never says a dose is safe, and always escalates red-flag symptoms. In an emergency, call 112 (India) or 911 (US).
+- The audit log truncates long free text. Secrets are read from the environment only, and `.env` is git-ignored.
 
 ## Known limitations and next steps
 
-- Notifications go to the in-app family dashboard only. Real SMS or push (for example Amazon SNS) is the next step.
-- Single household, no authentication. A real deployment needs accounts and per-caregiver permissions.
-- SQLite on a container's local disk resets when the container is redeployed. Use a managed database for anything beyond a demo.
-- The scam and symptom checks are transparent keyword rules, chosen so they can be explained and audited. A model-based classifier could add recall, with the rules kept as a floor.
-- Real Alexa+ integration needs the gated Alexa+ Add-on tools. The MCP server is ready to be registered once that access exists.
+- Family delivery goes to the CareCircle dashboard only. Real SMS or push (for example Amazon SNS) is next.
+- One household, no authentication. A real deployment needs accounts and per-caregiver permissions.
+- The safety screens are transparent rules, chosen so they can be explained and audited. A model-based classifier could add recall, with the rules kept as a floor.
+- SQLite on a container's local disk resets when the container is redeployed. Use a managed database beyond a demo.
+- Real Alexa+ integration needs the gated Alexa+ Add-on tools. The MCP server (Streamable HTTP, elicitation-ready) is the piece that would be registered.
 
 ## License
 
