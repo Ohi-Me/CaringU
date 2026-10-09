@@ -1,0 +1,3 @@
+{ "name": "CareCircle", "short_name": "CareCircle", "start_url": "/", "display": "standalone",
+  "background_color": "#f6f3ee", "theme_color": "#0f7c78",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }] }
