@@ -128,8 +128,8 @@ async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call
   return "Sorry, that took too many steps. Please try a simpler request.";
 }
 
-const AFFIRM = /(yes|yeah|yep|yup|sure|ok(ay)?|please do|go ahead|do it|confirm(ed)?|approve|haan|ji)/i;
-const EXTRA = /(another|again|extra|second|one more|twice|two)/i;
+const AFFIRM = /\b(yes|yeah|yep|yup|sure|ok(ay)?|please do|go ahead|do it|confirm(ed)?|approve|haan|ji)\b/i;
+const EXTRA = /\b(another|again|extra|second|one more|twice|two)\b/i;
 
 /**
  * Deterministic human-in-the-loop guard around the model's tool calls: the model
@@ -186,7 +186,7 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
           text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
         }
       } else text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
-      if (screen.wellbeingLogged && mode !== "safety-screen" && screen.triage.signals.includes("fall") && !/hurt/i.test(text))
+      if (screen.wellbeingLogged && mode !== "safety-screen" && screen.triage.signals.includes("fall") && !/\bhurt\b/i.test(text))
         text = `Are you hurt, and can you get up by yourself? If not, say "help" and call 112. I've let your family know. ${text}`;
       else if (screen.wellbeingLogged && mode !== "safety-screen" && !/family|ravi|neha/i.test(text))
         text = `I've noted how you're feeling and let your family know. ${text}`;

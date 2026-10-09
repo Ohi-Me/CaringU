@@ -128,3 +128,7 @@ h2 { font-size: 1rem; margin: 0 0 .6rem; }
 .claimed { color: var(--good); font-weight: 700; }
 .timeline-d { margin-top: 6px; font-size: .85rem; } .timeline-d p { margin: .2rem 0; }
 .trace .k-announce .kind, .trace .k-clock .kind { color: var(--good); }
+.ask-card { border: 2px solid var(--accent); background: var(--surface); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.ask-q { font-size: 1.2rem; font-weight: 700; margin: 0; }
+.btns.big button { font-size: 1.05rem; padding: .75rem 1.1rem; }
+.trace .k-elicitation .kind { color: var(--accent-2); font-weight: 700; }

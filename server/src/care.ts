@@ -219,11 +219,14 @@ export function forecastRefills(db: DB, now: Date, horizonDays = 7) {
   return listMedications(db).map((m) => {
     const perDay = m.times.length * m.pills_per_dose;
     const days = perDay ? m.pills_left / perDay : Infinity;
+    const requested = db.prepare("SELECT at FROM refills WHERE medication_id=? AND at > ? ORDER BY at DESC LIMIT 1")
+      .get(m.id, new Date(now.getTime() - 14 * 24 * HOUR).toISOString()) as Row | undefined;
     return {
       medication_id: m.id, medication: m.name, pills_left: m.pills_left, doses_per_day: m.times.length,
       days_of_supply: Math.floor(days),
       runs_out_on: Number.isFinite(days) ? ymd(new Date(now.getTime() + days * 24 * HOUR)) : null,
       needs_refill: days <= horizonDays,
+      refill_requested_at: requested ? localStamp(requested.at) : null,
     };
   }).sort((a, b) => a.days_of_supply - b.days_of_supply);
 }

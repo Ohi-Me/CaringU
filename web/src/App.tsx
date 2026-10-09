@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { callTool, onTrace, trace, type TraceEvent } from "./mcp";
+import { callTool, onTrace, setElicitHandler, trace, type TraceEvent } from "./mcp";
 
 type Turn = { role: "user" | "assistant"; text: string };
 type Orb = "idle" | "listening" | "thinking" | "speaking";
@@ -26,6 +26,10 @@ export default function App() {
   const [mode, setMode] = useState<{ mode: string; model: string | null } | null>(null);
   const [tick, setTick] = useState(0);
   const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
+  // A question the MCP server is asking the person on this device (elicitation), relayed by the agent.
+  const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
+  const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
+  deviceAskRef.current = deviceAsk;
   const recRef = useRef<any>(null);
   const orbRef = useRef<Orb>("idle");
   orbRef.current = orb;
@@ -37,18 +41,22 @@ export default function App() {
     load(); const t = setInterval(load, 30000); return () => clearInterval(t);
   }, [tick]);
 
-  const speak = useCallback((text: string) => {
-    if (!voiceOn || !("speechSynthesis" in window)) { setOrb("idle"); return; }
+  const speak = useCallback((text: string, keepState = false) => {
+    if (!voiceOn || !("speechSynthesis" in window)) { if (!keepState) setOrb("idle"); return; }
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.95;
     // Some browsers never fire onend (no voices, background tab); don't let the device get stuck "speaking".
-    const fallback = setTimeout(() => setOrb((o) => (o === "speaking" ? "idle" : o)), 1500 + text.split(/\s+/).length * 450);
-    u.onend = () => { clearTimeout(fallback); setOrb("idle"); };
-    u.onerror = () => { clearTimeout(fallback); setOrb("idle"); };
+    // keepState: we are mid-request (e.g. waiting for a yes/no), so return to "thinking", not idle.
+    const after: Orb = keepState ? "thinking" : "idle";
+    const fallback = setTimeout(() => setOrb((o) => (o === "speaking" ? after : o)), 1500 + text.split(/\s+/).length * 450);
+    u.onend = () => { clearTimeout(fallback); setOrb(after); };
+    u.onerror = () => { clearTimeout(fallback); setOrb(after); };
     setOrb("speaking");
     speechSynthesis.speak(u);
   }, [voiceOn]);
+  const speakRef = useRef(speak);
+  speakRef.current = speak;
 
   // Her device: speak caregiver replies and escalation notices as they arrive (via MCP).
   useEffect(() => {
@@ -82,7 +90,7 @@ export default function App() {
     trace({ source: "agent", kind: "user", label: `“${text}”` });
     let final = "";
     try {
-      const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker }) });
+      const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker, elicitation: true }) });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -101,6 +109,12 @@ export default function App() {
           else if (e.type === "model") trace({ source: "agent", kind: "model", label: `Bedrock ${e.model} step ${e.step + 1} (${e.stop})`, ok: true, ms: e.ms, detail: e.usage });
           else if (e.type === "warning") trace({ source: "agent", kind: "warning", label: e.message, ok: false });
           else if (e.type === "safety") trace({ source: "agent", kind: "safety", label: `Safety screen: health ${e.triage}${e.triage_signals.length ? ` (${e.triage_signals.join(", ")})` : ""} · scam ${e.scam}${e.scam_score !== null ? ` (${e.scam_score}/100)` : ""}`, detail: e });
+          else if (e.type === "elicit") {
+            trace({ source: "agent", kind: "elicitation", label: `Server asks her: ${e.message}` });
+            setDeviceAsk({ id: e.id, message: e.message });
+            speakRef.current?.(`${e.message.replace(/\?$/, "")}. Shall I go ahead? Say yes or no.`, true);
+          }
+          else if (e.type === "elicit_answer") { trace({ source: "agent", kind: "elicitation", label: `Answer sent to server: ${e.answer}`, ok: e.answer !== "no answer" }); setDeviceAsk(null); }
           else if (e.type === "guard") trace({ source: "agent", kind: "guard", label: `Blocked ${e.name}: ${e.reason}`, ok: false, detail: e.args });
           else if (e.type === "error") { trace({ source: "agent", kind: "error", label: e.message, ok: false }); final = `Sorry, I couldn't reach CareCircle. ${e.message}`; }
           else if (e.type === "final") { final = e.text; trace({ source: "agent", kind: "final", label: `${e.mode === "bedrock" ? "Bedrock agent" : e.mode === "safety-screen" ? "Safety screen" : "Rule agent"} replied in ${e.total_ms} ms`, ok: true }); }
@@ -115,6 +129,14 @@ export default function App() {
     speak(final);
   }, [turns, orb, speaker, speak]);
 
+  const answerDevice = async (approve: boolean) => {
+    const a = deviceAskRef.current;
+    if (!a) return;
+    setDeviceAsk(null);
+    speechSynthesis?.cancel();
+    await fetch(`/api/agent/elicit/${a.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approve }) }).catch(() => {});
+  };
+
   const listen = () => {
     const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     if (!SR) { alert("Voice input needs Chrome or Edge. You can type instead."); return; }
@@ -125,7 +147,17 @@ export default function App() {
     let heard = "";
     rec.onresult = (ev: any) => { heard = Array.from(ev.results).map((r: any) => r[0].transcript).join(" "); setInput(heard); };
     rec.onerror = () => setOrb("idle");
-    rec.onend = () => { setOrb("idle"); if (heard.trim()) send(heard); };
+    rec.onend = () => {
+      // While the server is waiting for a yes/no, the spoken answer goes to it, not into a new request.
+      if (deviceAskRef.current) {
+        setOrb("thinking");
+        if (/\b(yes|yeah|yep|sure|ok(ay)?|go ahead|haan|ha)\b/i.test(heard)) answerDevice(true);
+        else if (/\b(no|nope|don'?t|cancel|nahi)\b/i.test(heard)) answerDevice(false);
+        return;
+      }
+      setOrb("idle");
+      if (heard.trim()) send(heard);
+    };
     recRef.current = rec;
     setOrb("listening");
     rec.start();
@@ -182,9 +214,19 @@ export default function App() {
           </div>
 
           <button className={`orb orb-${orb}`} onClick={listen} aria-label={orb === "listening" ? "Stop listening" : "Tap to speak"}>
-            <span className="ring" /><span className="core">{orb === "listening" ? "Listening…" : orb === "thinking" ? "Working…" : orb === "speaking" ? "Speaking" : "Tap to talk"}</span>
+            <span className="ring" /><span className="core">{orb === "listening" ? "Listening…" : deviceAsk ? "Say yes or no" : orb === "thinking" ? "Working…" : orb === "speaking" ? "Speaking" : "Tap to talk"}</span>
           </button>
 
+          {deviceAsk && (
+            <div className="ask-card" role="alertdialog" aria-label="Approval needed">
+              <p className="ask-q">{deviceAsk.message}</p>
+              <p className="muted small">CareCircle's server is asking you directly (MCP elicitation). Nothing happens unless you say yes.</p>
+              <div className="btns big">
+                <button onClick={() => answerDevice(true)}>Yes, go ahead</button>
+                <button className="ghost" onClick={() => answerDevice(false)}>No</button>
+              </div>
+            </div>
+          )}
           <div className="exchange" aria-live="polite">
             {lastUser && <p className="heard">“{lastUser.text}”</p>}
             {orb === "thinking" ? <p className="reply muted">Checking CareCircle…</p>
@@ -272,6 +314,17 @@ function Family({ tick }: { tick: number }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [me, setMe] = useState("Ravi (son)");
+  // Questions the MCP server sends to this dashboard (elicitation), e.g. "Send a refill request…?"
+  const [ask, setAsk] = useState<{ message: string; resolve: (a: { approve: boolean; by: string } | null) => void } | null>(null);
+  useEffect(() => {
+    setElicitHandler((message) => new Promise((resolve) => setAsk({ message, resolve })));
+    return () => setElicitHandler(null);
+  }, []);
+  const answer = (approve: boolean | null) => {
+    if (!ask) return;
+    ask.resolve(approve === null ? null : { approve, by: me });
+    setAsk(null);
+  };
 
   const load = useCallback(async (quiet = true) => {
     const [a, b] = await Promise.all([callTool("get_family_digest", {}, quiet), callTool("get_care_overview", {}, quiet)]);
@@ -300,6 +353,16 @@ function Family({ tick }: { tick: number }) {
         </label>
         <span className="muted small">Urgent alerts go to Ravi first, then Neha if nobody responds.</span>
       </div>
+      {ask && (
+        <div className="ask-card" role="alertdialog" aria-label="Approval needed">
+          <p className="ask-q">{ask.message}</p>
+          <p className="muted small">Asked by the CareCircle server over MCP (elicitation). It runs only if you approve.</p>
+          <div className="btns big">
+            <button onClick={() => answer(true)}>Approve as {me.split(" ")[0]}</button>
+            <button className="ghost" onClick={() => answer(false)}>Decline</button>
+          </div>
+        </div>
+      )}
       <div className="card stats">
         <Stat label="Doses taken today" value={`${d.adherence.taken}/${d.adherence.scheduled_today}`} />
         <Stat label="Missed" value={d.adherence.missed} tone={d.adherence.missed ? "warn" : undefined} />
@@ -364,7 +427,7 @@ function Family({ tick }: { tick: number }) {
           {d.refills_needed.length === 0 ? <p className="muted">Supplies are fine.</p> : d.refills_needed.map((r: any) => (
             <div key={r.medication_id} className="row">
               <span><b>{r.medication}</b> · {r.pills_left} left, runs out {r.runs_out_on}</span>
-              <button disabled={!!busy} onClick={() => act(r.medication_id, "request_refill", { medication: r.medication_id })}>Prepare refill</button>
+              {r.refill_requested_at ? <span className="claimed">✓ Requested {r.refill_requested_at.split(" ")[1]}</span> : <button disabled={!!busy} onClick={() => act(r.medication_id, "request_refill", { medication: r.medication_id })}>Prepare refill</button>}
             </div>
           ))}
         </div>

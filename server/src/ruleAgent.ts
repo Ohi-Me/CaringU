@@ -83,7 +83,7 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     const med = medRef(lower);
     if (!med) return "Which medicine did you take?";
     const taken_at = whenTaken(lower, now);
-    if (!taken_at && /(this morning|earlier|last night|yesterday)/.test(lower)) {
+    if (!taken_at && /\b(this morning|earlier|last night|yesterday)\b/.test(lower)) {
       const st = await call("check_dose_status", { medication: med });
       if (st.ok && st.data.recorded_within_min_gap) return `Yes, I have your ${st.data.medication.name} recorded at ${time(st.data.last_recorded)}. Nothing else to do.`;
       return "Roughly what time did you take it? For example, say 'at 9'.";
@@ -105,8 +105,9 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     if (!target) {
       const f = await call("forecast_refills", { horizon_days: 7 });
       if (!f.ok) return `I couldn't check supplies: ${err(f)}`;
-      const need = f.data.find((m: any) => m.needs_refill);
-      if (!need) return "All your medicines have more than a week's supply.";
+      const need = f.data.find((m: any) => m.needs_refill && !m.refill_requested_at);
+      const already = f.data.filter((m: any) => m.needs_refill && m.refill_requested_at).map((m: any) => m.medication);
+      if (!need) return already.length ? `A refill for ${list(already)} was already requested. Everything else has more than a week's supply.` : "All your medicines have more than a week's supply.";
       target = need.medication;
       lead = `${need.medication} runs out in about ${need.days_of_supply} days. `;
     }
