@@ -73,8 +73,8 @@ test("SDK client: full flow changes persistent state and errors are structured",
   assert.equal(r1.ok, true);
   assert.equal(r1.data.pills_left, amlo.pills_left - 1);
   const r2 = await call("record_dose", { medication: "BP pill" });
-  assert.equal(r2.ok, false);
-  assert.equal(r2.error.code, "DOUBLE_DOSE_RISK");
+  assert.equal(r2.data.status, "possible_duplicate");
+  assert.equal(r2.data.changed, false);
 
   const p = await call("request_refill", { medication: "Amlodipine" });
   assert.equal(p.data.status, "awaiting_confirmation");

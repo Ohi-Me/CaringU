@@ -2,6 +2,7 @@
 // WHICH of these to call; every fact and every safety rule lives here.
 import { randomUUID } from "node:crypto";
 import { type DB, tx } from "./db.js";
+import { screenScam, triageText } from "./safety.js";
 
 export class ToolError extends Error {
   constructor(public code: string, message: string, public retryable = false, public details?: unknown) {
@@ -82,43 +83,85 @@ function lastDose(db: DB, medId: string) {
   return db.prepare("SELECT * FROM dose_log WHERE medication_id = ? ORDER BY taken_at DESC LIMIT 1").get(medId) as Row | undefined;
 }
 
+// CareCircle only knows about doses that were reported to it, so it never says a
+// dose is "safe". It reports what is recorded and points to a pharmacist when in doubt.
+export const RECORD_BASIS = "Based only on doses reported to CareCircle; doses that were not reported are unknown.";
+export const MISSED_DOSE_GUIDANCE = "Do not take two doses together to make up. Whether a late dose should still be taken depends on the medicine: ask the pharmacist or doctor.";
+
 export function doseStatus(db: DB, ref: string, now: Date) {
   const m = findMedication(db, ref);
   const last = lastDose(db, m.id);
   const hoursSince = last ? (now.getTime() - new Date(last.taken_at).getTime()) / HOUR : null;
-  const safe = hoursSince === null || hoursSince >= m.min_gap_hours;
+  const withinGap = hoursSince !== null && hoursSince < m.min_gap_hours;
   const next = [0, 1].flatMap((d) => {
     const day = new Date(now.getTime() + d * 24 * HOUR);
     return m.times.map((t) => slotOn(day, t));
   }).find((s) => s.getTime() > now.getTime());
+  const today = careOverview(db, now).medication_schedule.filter((s) => s.medication_id === m.id)
+    .map((s) => ({ time: s.time, status: s.status, recorded_at: s.taken_at }));
   return {
     medication: { id: m.id, name: m.name, dose: m.dose, purpose: m.purpose, with_food: m.with_food },
-    last_taken: last ? localStamp(last.taken_at) : null,
-    hours_since_last: hoursSince === null ? null : Math.round(hoursSince * 10) / 10,
+    last_recorded: last ? localStamp(last.taken_at) : null,
+    hours_since_last_record: hoursSince === null ? null : Math.round(hoursSince * 10) / 10,
     min_gap_hours: m.min_gap_hours,
-    safe_to_take_now: safe,
-    earliest_safe_time: safe || !last ? null : localStamp(new Date(new Date(last.taken_at).getTime() + m.min_gap_hours * HOUR).toISOString()),
+    recorded_within_min_gap: withinGap,
+    today,
     next_scheduled: next ? localStamp(next.toISOString()) : null,
     pills_left: m.pills_left,
+    basis: RECORD_BASIS,
+    guidance: withinGap
+      ? `A dose is already recorded at ${localStamp(last!.taken_at)}. Tell the user not to take another ${m.name} now.`
+      : today.some((s) => s.status === "missed")
+        ? `A scheduled dose has no record. Do not say it is safe or tell them to take it: ask them to check their pill organiser; if they still aren't sure, ${MISSED_DOSE_GUIDANCE}`
+        : "No dose recorded within the minimum gap. Do not say it is safe: say what is recorded and when it is scheduled; if they are unsure whether they already took it, ask them to check their pill organiser or ask a pharmacist.",
   };
 }
 
-export function recordDose(db: DB, ref: string, recordedBy: string, now: Date, note?: string) {
+/** "HH:MM" (today), "YYYY-MM-DD HH:MM", or empty for now. Must be within the past 24h. */
+function parseTakenAt(s: string | undefined, now: Date) {
+  if (!s || s === "now") return now;
+  let d: Date;
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+  if (hm) { d = new Date(now); d.setHours(+hm[1], +hm[2], 0, 0); }
+  else d = parseLocalDateTime(s.trim());
+  if (d.getTime() > now.getTime() + 5 * 60_000) throw new ToolError("TAKEN_AT_IN_FUTURE", `taken_at ${s} is in the future.`);
+  if (now.getTime() - d.getTime() > 24 * HOUR) throw new ToolError("TAKEN_AT_TOO_OLD", "Can only record doses from the last 24 hours.");
+  return d;
+}
+
+export function recordDose(db: DB, ref: string, recordedBy: string, now: Date,
+  opts: { taken_at?: string; extra_dose_confirmed?: boolean; note?: string } = {}) {
   const m = findMedication(db, ref);
-  const st = doseStatus(db, m.id, now);
-  if (!st.safe_to_take_now) {
-    raiseAlert(db, now, "warning", "double_dose_blocked",
-      `Blocked a possible double dose of ${m.name}: last taken ${st.last_taken}, minimum gap ${m.min_gap_hours}h.`);
-    throw new ToolError("DOUBLE_DOSE_RISK",
-      `${m.name} was already taken at ${st.last_taken} (${st.hours_since_last}h ago). Minimum gap is ${m.min_gap_hours}h. Dose NOT recorded; family has been notified.`,
-      false, st);
+  const at = parseTakenAt(opts.taken_at, now);
+  const nearby = (db.prepare("SELECT * FROM dose_log WHERE medication_id = ? AND taken_at > ? AND taken_at < ? ORDER BY taken_at DESC")
+    .all(m.id, new Date(at.getTime() - m.min_gap_hours * HOUR).toISOString(), new Date(at.getTime() + m.min_gap_hours * HOUR).toISOString()) as Row[])[0];
+  if (nearby && !opts.extra_dose_confirmed) {
+    const gapMin = Math.abs(at.getTime() - new Date(nearby.taken_at).getTime()) / 60_000;
+    // Same dose reported again (e.g. "I took it this morning at 9" when 09:05 is recorded): nothing to do.
+    if (opts.taken_at && gapMin <= 60)
+      return { status: "already_recorded", medication: m.name, recorded_at: localStamp(nearby.taken_at), changed: false };
+    return {
+      status: "possible_duplicate", medication: m.name, changed: false,
+      existing_record: localStamp(nearby.taken_at), min_gap_hours: m.min_gap_hours,
+      question_for_user: `My records show ${m.name} at ${localStamp(nearby.taken_at).split(" ")[1]}. Is that the dose you mean, or did you take another one just now?`,
+      next_step: "Ask the question. If they took ANOTHER one, call record_dose again with extra_dose_confirmed=true. If it is the same dose, record nothing.",
+    };
   }
   if (m.pills_left < m.pills_per_dose)
     throw new ToolError("OUT_OF_STOCK", `No ${m.name} pills left according to the record. Request a refill.`);
   return tx(db, () => {
     const doseId = id("dose");
-    db.prepare("INSERT INTO dose_log (id, medication_id, taken_at, recorded_by, note) VALUES (?,?,?,?,?)")
-      .run(doseId, m.id, now.toISOString(), recordedBy, note ?? null);
+    db.prepare("INSERT INTO dose_log (id, medication_id, taken_at, recorded_by, note, extra) VALUES (?,?,?,?,?,?)")
+      .run(doseId, m.id, at.toISOString(), recordedBy, opts.note ?? null, nearby ? 1 : 0);
+    let extra_dose: Record<string, string> | null = null;
+    if (nearby) {
+      const msg = `Possible extra dose: ${m.name} recorded at ${localStamp(nearby.taken_at).split(" ")[1]} and again at ${localStamp(at.toISOString()).split(" ")[1]} (minimum gap ${m.min_gap_hours}h). Please call her.`;
+      raiseAlert(db, now, "urgent", "extra_dose", msg);
+      extra_dose = {
+        alert: msg,
+        guidance_for_user: `Don't take any more ${m.name} today unless a doctor or pharmacist tells you to. Please call your pharmacist or doctor now and tell them you may have taken an extra dose. If you feel faint, very dizzy, confused or have chest pain, call 112 straight away. I've told your family.`,
+      };
+    }
     db.prepare("UPDATE medications SET pills_left = pills_left - pills_per_dose WHERE id = ?").run(m.id);
     const after = findMedication(db, m.id);
     let refill_warning: string | null = null;
@@ -128,7 +171,8 @@ export function recordDose(db: DB, ref: string, recordedBy: string, now: Date, n
         .get(`${after.name}:%`);
       if (!open) raiseAlert(db, now, "warning", "refill_low", refill_warning);
     }
-    return { dose_id: doseId, medication: after.name, taken_at: localStamp(now.toISOString()), pills_left: after.pills_left, refill_warning };
+    return { status: extra_dose ? "extra_dose_recorded" : "recorded", changed: true, dose_id: doseId, medication: after.name,
+      taken_at: localStamp(at.toISOString()), pills_left: after.pills_left, refill_warning, extra_dose };
   });
 }
 
@@ -161,6 +205,8 @@ export function careOverview(db: DB, now: Date, date?: string) {
       due_now: schedule.filter((s) => s.status === "due_now").length,
       upcoming: schedule.filter((s) => s.status === "upcoming").length,
     },
+    missed_dose_guidance: schedule.some((s) => s.status === "missed") ? MISSED_DOSE_GUIDANCE : null,
+    basis: RECORD_BASIS,
     appointments: listAppointments(db, now, ymd(day), 1),
     open_alerts: listAlerts(db, false).slice(0, 5),
     pending_confirmations: listPending(db),
@@ -282,64 +328,42 @@ export function resolvePending(db: DB, now: Date, pid: string, approve: boolean,
   });
 }
 
-// ---------- wellbeing & safety ----------
-const RED_FLAGS: [RegExp, string][] = [
-  [/chest (pain|tight|pressure)/i, "chest pain"], [/(short(ness)? of breath|can'?t breathe|breathless)/i, "breathing difficulty"],
-  [/\b(fell|fall(en)?|fallen down)\b/i, "a fall"], [/(faint|passed out|black(ed)? out|unconscious)/i, "fainting"],
-  [/(slurred|can'?t speak|face (droop|numb))/i, "possible stroke sign"], [/(numb|weak(ness)? in (my )?(arm|leg|face))/i, "one-sided weakness/numbness"],
-  [/(confus|don'?t know where)/i, "confusion"], [/(severe|worst) headache/i, "severe headache"], [/(bleeding|vomit(ing)? blood|blood in)/i, "bleeding"],
-];
-const WATCH = [/dizz/i, /(nause|vomit)/i, /(fever|chills)/i, /(pain|ache)/i, /(lonely|sad|depress|anxious)/i, /(not eating|no appetite)/i, /(can'?t sleep|insomnia)/i];
+// ---------- wellbeing & safety (rules live in safety.ts) ----------
+export const EMERGENCY_LINE = "This could be an emergency. Please call 112 now (911 in the US), or press your emergency button.";
 
 export function logWellbeing(db: DB, now: Date, mood: string | undefined, symptoms: string) {
-  const red = RED_FLAGS.filter(([re]) => re.test(symptoms)).map(([, l]) => l);
-  const watch = WATCH.filter((re) => re.test(symptoms)).length > 0;
+  const t = triageText(symptoms);
   const wid = id("wb");
   db.prepare("INSERT INTO wellbeing (id, at, mood, symptoms, red_flag) VALUES (?,?,?,?,?)")
-    .run(wid, now.toISOString(), mood ?? null, symptoms, red.length ? 1 : 0);
+    .run(wid, now.toISOString(), mood ?? null, symptoms, t.triage === "urgent" ? 1 : 0);
   let alert = null;
-  if (red.length) alert = raiseAlert(db, now, "urgent", "red_flag_symptom", `Red-flag symptom reported (${red.join(", ")}): "${symptoms}"`);
-  else if (watch) alert = raiseAlert(db, now, "warning", "symptom", `Symptom reported: "${symptoms}"${mood ? ` (mood: ${mood})` : ""}`);
+  if (t.triage === "urgent") alert = raiseAlert(db, now, "urgent", "red_flag_symptom", `Possible emergency (${t.signals.join(", ")}): "${symptoms}". Call her now.`);
+  else if (t.triage === "watch") alert = raiseAlert(db, now, "warning", "symptom", `Symptom reported (${t.signals.join(", ")}): "${symptoms}"${mood ? ` (mood: ${mood})` : ""}`);
   return {
-    entry_id: wid, triage: red.length ? "urgent" : watch ? "watch" : "routine", red_flags: red, family_alerted: !!alert,
-    guidance: red.length
-      ? "Possible emergency. Tell the user to call emergency services now (112 in India, 911 in the US) or press their emergency button. Family has been alerted. Do NOT give medical advice."
-      : watch ? "Family has been informed. Suggest rest and water, and contacting their doctor if it gets worse. Do NOT diagnose."
-      : "Logged.",
+    entry_id: wid, triage: t.triage, signals: t.signals, family_alerted: !!alert, alert_id: alert?.alert_id ?? null,
+    say_first: t.triage === "urgent" ? EMERGENCY_LINE : null,
+    guidance: t.triage === "urgent"
+      ? "Start the reply with say_first. Family has been alerted. Do NOT diagnose or suggest waiting."
+      : t.triage === "watch" ? "Family has been informed. Suggest rest, water, and contacting their doctor if it gets worse or they are worried. Do NOT diagnose."
+      : "Logged. Nothing concerning detected.",
   };
 }
-
-const SCAM_SIGNALS: [RegExp, number, string][] = [
-  [/\b(otp|one[- ]time (pass)?code|pin|cvv|password)\b/i, 35, "asks for a code/PIN/password"],
-  [/(gift ?card|itunes|google play card|crypto|bitcoin|wire transfer|western union)/i, 30, "unusual payment method"],
-  [/(anydesk|teamviewer|quick ?support|remote access|install (this|an) app|screen share)/i, 35, "asks to install remote-access software"],
-  [/(urgent|immediately|within (an|1|one|24) ?hours?|right now|last chance|account (will be )?(blocked|suspended|frozen))/i, 15, "pressure / urgency"],
-  [/(kyc|verify your (account|identity)|update your (pan|aadhaar|details))/i, 20, "fake verification request"],
-  [/(won|lottery|prize|reward|cashback|refund pending)/i, 20, "too-good-to-be-true prize/refund"],
-  [/(police|cbi|customs|tax department|income tax|irs|court|arrest|digital arrest|parcel (seized|held))/i, 30, "impersonates authority / threat"],
-  [/(don'?t tell|keep (this|it) (a )?secret|do not inform)/i, 25, "asks for secrecy"],
-  [/(grand(son|daughter)|it'?s me).*(trouble|accident|hospital|jail|need money)/i, 30, "family-emergency money request"],
-  [/(bank|sbi|hdfc|icici|paypal|amazon).*(call|link|click|verify)/i, 10, "claims to be a bank/company"],
-  [/(https?:\/\/|bit\.ly|tinyurl)/i, 10, "contains a link"],
-];
 
 export function assessScam(db: DB, now: Date, text: string, channel = "call") {
-  const hits = SCAM_SIGNALS.filter(([re]) => re.test(text));
-  const score = Math.min(100, hits.reduce((s, [, w]) => s + w, 0));
-  const verdict = score >= 50 ? "likely_scam" : score >= 25 ? "suspicious" : "no_strong_signals";
-  let alerted = false;
-  if (verdict !== "no_strong_signals") {
-    raiseAlert(db, now, verdict === "likely_scam" ? "urgent" : "warning", "scam_guard",
-      `Possible ${channel} scam (risk ${score}/100): ${hits.map((h) => h[2]).join("; ")}.`);
-    alerted = true;
-  }
+  const s = screenScam(text);
+  let alert = null;
+  if (s.verdict !== "no_strong_signals")
+    alert = raiseAlert(db, now, s.verdict === "likely_scam" ? "urgent" : "warning", "scam_guard",
+      `${s.verdict === "likely_scam" ? "Likely" : "Possible"} ${s.scam_type ?? ""} scam by ${channel}${s.in_progress ? " — the caller is STILL ON THE LINE" : ""} (risk ${s.risk_score}/100): ${s.signals.join("; ")}.`);
   return {
-    risk_score: score, verdict, signals: hits.map((h) => h[2]), family_alerted: alerted,
-    advice: verdict === "no_strong_signals"
-      ? "No strong scam signals found, but never share codes or PINs with callers."
-      : "Do not share any code, PIN or bank detail and do not install anything. Hang up and call your family or the bank's official number yourself.",
+    ...s, channel, family_alerted: !!alert, alert_id: alert?.alert_id ?? null,
+    say_first: s.verdict === "likely_scam" ? (s.in_progress ? "Hang up now." : "This looks like a scam.") : null,
+    advice: s.verdict === "no_strong_signals"
+      ? "No strong scam signals. Still: never share codes or PINs, and if unsure call back on an official number you already have."
+      : "Do not share any code, PIN or card detail, do not pay, scan or install anything. Hang up, and if you want to check, call your family or the official number you already have (for a bank: the number on the back of your card).",
   };
 }
+
 
 // ---------- alerts / family ----------
 export function raiseAlert(db: DB, now: Date, severity: "info" | "warning" | "urgent", kind: string, message: string) {

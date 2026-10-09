@@ -59,15 +59,20 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
 
   tool("check_dose_status", {
     title: "Did I take it?", readOnly: true,
-    description: "Answers 'did I take my X?'. Returns when the medication was last taken, whether another dose is safe now, and the next scheduled time. Accepts a medication id, name or purpose (e.g. 'BP pill').",
+    description: "Answers 'did I take my X?' / 'should I take X?'. Returns what is RECORDED (last record, whether a dose is recorded within the minimum gap, today's slots) and the next scheduled time. It never certifies a dose as safe: records only include reported doses. Accepts a medication id, name or purpose (e.g. 'BP pill').",
     input: { medication: z.string().min(1).max(80) },
   }, (a, now) => care.doseStatus(db, a.medication, now));
 
   tool("record_dose", {
     title: "Record a dose taken",
-    description: "Record that the user just took a medication. Has a built-in double-dose guard: if the previous dose was too recent it refuses with DOUBLE_DOSE_RISK and alerts family. Decrements pill count and warns when supply is low.",
-    input: { medication: z.string().min(1).max(80), recorded_by: actor, note: z.string().max(200).optional() },
-  }, (a, now) => care.recordDose(db, a.medication, a.recorded_by ?? "Asha (voice)", now, a.note));
+    description: "Record that the user took a medication (now, or at taken_at). If another dose is already recorded within the minimum gap it records NOTHING and returns status=possible_duplicate with a question to ask; only if the user says they really took another one, call again with extra_dose_confirmed=true, which records it, raises an URGENT family alert and returns guidance. Same dose reported twice returns already_recorded. Decrements pill count and warns when supply is low.",
+    input: {
+      medication: z.string().min(1).max(80), recorded_by: actor,
+      taken_at: z.string().max(20).optional().describe("When it was taken: 'HH:MM' today or 'YYYY-MM-DD HH:MM'; omit for now"),
+      extra_dose_confirmed: z.boolean().optional().describe("true ONLY after the user confirmed they took an additional dose"),
+      note: z.string().max(200).optional(),
+    },
+  }, (a, now) => care.recordDose(db, a.medication, a.recorded_by ?? "Asha (voice)", now, { taken_at: a.taken_at, extra_dose_confirmed: a.extra_dose_confirmed, note: a.note }));
 
   tool("forecast_refills", {
     title: "Forecast refills", readOnly: true,
@@ -111,7 +116,7 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
 
   tool("log_wellbeing", {
     title: "Log how I feel",
-    description: "Log mood and symptoms. Red-flag symptoms (chest pain, breathing trouble, fall, fainting, stroke signs, confusion, bleeding) create an URGENT family alert and return emergency guidance. Never diagnose.",
+    description: "Log mood and symptoms. Deterministic triage (urgent / watch / routine) with negation handling. Urgent red flags (stroke signs, chest pain, breathing trouble, fainting, serious fall, heavy bleeding, low-sugar confusion) create an URGENT family alert and return say_first, which must open the reply. Never diagnose.",
     input: { symptoms: z.string().min(1).max(500), mood: z.string().max(40).optional() },
   }, (a, now) => care.logWellbeing(db, now, a.mood, a.symptoms));
 

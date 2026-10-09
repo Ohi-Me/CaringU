@@ -115,3 +115,4 @@ h2 { font-size: 1rem; margin: 0 0 .6rem; }
   .two, .stats { grid-template-columns: 1fr 1fr; }
   .orb { width: 170px; height: 170px; }
 }
+.trace .k-safety .kind { color: var(--warn); } .trace .k-guard .kind { color: var(--urgent); }

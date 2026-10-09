@@ -31,22 +31,45 @@ test("synonyms resolve: BP pill -> Amlodipine, sugar -> Metformin", () => {
   assert.equal(code(() => care.findMedication(db, "aspirin")), "MEDICATION_NOT_FOUND");
 });
 
-test("record_dose decrements stock and the double-dose guard blocks a repeat", () => {
+test("record_dose: duplicate within gap is NOT silently recorded; user must confirm an extra dose", () => {
   const db = fresh();
-  const r = care.recordDose(db, "bp", "test", at(10));
+  const r = care.recordDose(db, "bp", "test", at(10)) as any;
+  assert.equal(r.status, "recorded");
   assert.equal(r.pills_left, 3);
-  assert.match(r.refill_warning!, /Amlodipine/);
-  assert.equal(code(() => care.recordDose(db, "bp", "test", at(12))), "DOUBLE_DOSE_RISK");
-  assert.equal(care.findMedication(db, "bp").pills_left, 3, "blocked dose must not change stock");
-  assert.ok(care.listAlerts(db, false).some((a) => a.kind === "double_dose_blocked"));
-  assert.equal(care.doseStatus(db, "bp", at(12)).safe_to_take_now, false);
-  assert.equal(care.doseStatus(db, "bp", at(10 + 21)).safe_to_take_now, true);
+  assert.match(r.refill_warning, /Amlodipine/);
+  const dup = care.recordDose(db, "bp", "test", at(12)) as any;
+  assert.equal(dup.status, "possible_duplicate");
+  assert.equal(dup.changed, false);
+  assert.equal(care.findMedication(db, "bp").pills_left, 3, "unconfirmed duplicate must not change stock");
+  const extra = care.recordDose(db, "bp", "test", at(12), { extra_dose_confirmed: true }) as any;
+  assert.equal(extra.status, "extra_dose_recorded");
+  assert.match(extra.extra_dose.guidance_for_user, /pharmacist|doctor/);
+  assert.ok(care.listAlerts(db, false).some((a) => a.kind === "extra_dose" && a.severity === "urgent"));
+});
+
+test("record_dose: same dose reported again with a time is a no-op; times are validated", () => {
+  const db = fresh();
+  care.recordDose(db, "bp", "t", at(10), { taken_at: "09:05" });
+  const again = care.recordDose(db, "bp", "t", at(10), { taken_at: "09:00" }) as any;
+  assert.equal(again.status, "already_recorded");
+  assert.equal(code(() => care.recordDose(db, "thyroid", "t", at(10), { taken_at: "11:00" })), "TAKEN_AT_IN_FUTURE");
+  assert.equal(code(() => care.recordDose(db, "thyroid", "t", at(10), { taken_at: "2026-10-01 09:00" })), "TAKEN_AT_TOO_OLD");
+});
+
+test("dose status never certifies safety", () => {
+  const db = fresh();
+  const s = care.doseStatus(db, "bp", at(10)) as any;
+  assert.equal("safe_to_take_now" in s, false);
+  assert.equal(s.recorded_within_min_gap, false);
+  assert.match(s.basis, /only/);
+  assert.doesNotMatch(s.guidance, /safe to take/i);
+  assert.equal((care.doseStatus(db, "thyroid", at(10)) as any).recorded_within_min_gap, true);
 });
 
 test("Metformin 8h gap: evening dose allowed after morning dose", () => {
   const db = fresh();
-  assert.equal(code(() => care.recordDose(db, "metformin", "t", at(12))), "DOUBLE_DOSE_RISK");
-  assert.ok(care.recordDose(db, "metformin", "t", at(20, 30)).dose_id);
+  assert.equal((care.recordDose(db, "metformin", "t", at(12)) as any).status, "possible_duplicate");
+  assert.equal((care.recordDose(db, "metformin", "t", at(20, 30)) as any).status, "recorded");
 });
 
 test("refill: proposal does nothing until confirmed; confirm is idempotent", () => {
@@ -82,7 +105,8 @@ test("appointment scheduling validates and reports clashes", () => {
 test("red-flag symptoms escalate urgently; mild ones are watch", () => {
   const db = fresh();
   assert.equal(care.logWellbeing(db, at(10), undefined, "I have chest pain").triage, "urgent");
-  assert.equal(care.logWellbeing(db, at(10), undefined, "I fell in the bathroom").triage, "urgent");
+  assert.equal(care.logWellbeing(db, at(10), undefined, "I fell in the bathroom and can't get up").triage, "urgent");
+  assert.equal(care.logWellbeing(db, at(10), undefined, "I fell in the bathroom").triage, "watch");
   assert.equal(care.logWellbeing(db, at(10), undefined, "a bit dizzy").triage, "watch");
   assert.equal(care.logWellbeing(db, at(10), "happy", "slept well").triage, "routine");
   assert.equal(care.listAlerts(db, false).filter((a) => a.severity === "urgent").length, 2);

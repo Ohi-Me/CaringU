@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS medications (
 );
 CREATE TABLE IF NOT EXISTS dose_log (
   id TEXT PRIMARY KEY, medication_id TEXT NOT NULL REFERENCES medications(id),
-  taken_at TEXT NOT NULL, recorded_by TEXT NOT NULL, note TEXT
+  taken_at TEXT NOT NULL, recorded_by TEXT NOT NULL, note TEXT,
+  extra INTEGER NOT NULL DEFAULT 0   -- 1 = recorded inside the minimum gap after the user confirmed an extra dose
 );
 CREATE TABLE IF NOT EXISTS appointments (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, starts_at TEXT NOT NULL, location TEXT,
@@ -51,6 +52,9 @@ export function openDb(path: string): DB {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  // Migration for databases created before the extra-dose column existed.
+  const cols = db.prepare("PRAGMA table_info(dose_log)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "extra")) db.exec("ALTER TABLE dose_log ADD COLUMN extra INTEGER NOT NULL DEFAULT 0");
   return db;
 }
 

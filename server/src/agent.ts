@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { BedrockRuntimeClient, ConverseCommand, type Message, type Tool } from "@aws-sdk/client-bedrock-runtime";
 import { ruleAgent } from "./ruleAgent.js";
+import { enforce, runScreen, type ScreenOutcome } from "./screen.js";
 import type { Clock } from "./care.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -66,7 +67,7 @@ export function bedrockConfigured() {
     || existsSync(join(homedir(), ".aws", "credentials")));
 }
 
-async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date) {
+async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date, screen: ScreenOutcome) {
   const br = new BedrockRuntimeClient({ region: REGION });
   const toolConfig = {
     tools: tools.map((t) => ({ toolSpec: { name: t.name, description: t.description, inputSchema: { json: t.inputSchema } } })) as Tool[],
@@ -76,7 +77,7 @@ async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call
   for (let step = 0; step < MAX_STEPS; step++) {
     const t0 = performance.now();
     const out = await br.send(new ConverseCommand({
-      modelId: MODEL_ID, system: [{ text: systemPrompt(now, speaker) }], messages, toolConfig,
+      modelId: MODEL_ID, system: [{ text: systemPrompt(now, speaker) + (screen.notes.length ? `\nSAFETY SCREEN (already executed for the latest message):\n- ${screen.notes.join("\n- ")}` : "") }], messages, toolConfig,
       inferenceConfig: { maxTokens: 700, temperature: 0.2 },
     }));
     emit({ type: "model", provider: "bedrock", model: MODEL_ID, step, ms: Math.round(performance.now() - t0), usage: out.usage, stop: out.stopReason });
@@ -96,6 +97,27 @@ async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call
   return "Sorry, that took too many steps. Please try a simpler request.";
 }
 
+const AFFIRM = /(yes|yeah|yep|yup|sure|ok(ay)?|please do|go ahead|do it|confirm(ed)?|approve|haan|ji)/i;
+const EXTRA = /(another|again|extra|second|one more|twice|two)/i;
+
+/**
+ * Deterministic human-in-the-loop guard around the model's tool calls: the model
+ * cannot approve a pending action or record an extra dose unless the user's
+ * latest message actually says so. Caregivers approve from the dashboard.
+ */
+function guarded(call: CallTool, lastUser: string, emit: Emit): CallTool {
+  return async (name, args) => {
+    let reason: string | null = null;
+    if (name === "confirm_action" && args.approve === true && !AFFIRM.test(lastUser))
+      reason = "The user's latest message is not an explicit yes. Read the summary and ask them first.";
+    if (name === "record_dose" && args.extra_dose_confirmed === true && !EXTRA.test(lastUser))
+      reason = "The user has not said they took an additional dose. Ask the duplicate-dose question first.";
+    if (!reason) return call(name, args);
+    emit({ type: "guard", name, args, reason });
+    return { ok: false, error: { code: "USER_CONFIRMATION_REQUIRED", message: reason, retryable: false } };
+  };
+}
+
 export function agentRouter(mcpUrl: string, clock: Clock) {
   const r = Router();
   r.get("/mode", (_req, res) => res.json({ mode: bedrockConfigured() ? "bedrock" : "rules", model: bedrockConfigured() ? MODEL_ID : null }));
@@ -109,16 +131,25 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
     let mcp: Awaited<ReturnType<typeof connectMcp>> | undefined;
     try {
       mcp = await connectMcp(mcpUrl, emit);
+      const lastUser = history[history.length - 1].text;
+      const screen = await runScreen(lastUser, speaker, mcp.call, emit);
       let text: string, mode = bedrockConfigured() ? "bedrock" : "rules";
-      if (mode === "bedrock") {
-        try { text = await bedrockAgent(history, speaker, mcp.tools, mcp.call, emit, clock()); }
+      if (screen.terminalReply) {
+        text = screen.terminalReply;
+        mode = "safety-screen";
+      } else if (mode === "bedrock") {
+        try { text = enforce(await bedrockAgent(history, speaker, mcp.tools, guarded(mcp.call, lastUser, emit), emit, clock(), screen), screen); }
         catch (e: any) {
           // Honest degradation: say the model failed, then use the deterministic planner.
           emit({ type: "warning", message: `Bedrock unavailable (${e?.name ?? "error"}: ${String(e?.message ?? e).slice(0, 160)}). Falling back to rule-based planner.` });
           mode = "rules";
-          text = await ruleAgent(history, speaker, mcp.call, clock());
+          text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
         }
-      } else text = await ruleAgent(history, speaker, mcp.call, clock());
+      } else text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
+      if (screen.wellbeingLogged && mode !== "safety-screen" && screen.triage.signals.includes("fall") && !/hurt/i.test(text))
+        text = `Are you hurt, and can you get up by yourself? If not, say "help" and call 112. I've let your family know. ${text}`;
+      else if (screen.wellbeingLogged && mode !== "safety-screen" && !/family|ravi|neha/i.test(text))
+        text = `I've noted how you're feeling and let your family know. ${text}`;
       emit({ type: "final", text, mode, total_ms: Math.round(performance.now() - t0) });
     } catch (e: any) {
       emit({ type: "error", message: `Could not reach the CareCircle MCP server: ${e?.message ?? e}` });

@@ -10,8 +10,8 @@ const SUGGESTIONS = [
   "I just took my blood pressure pill",
   "Am I running low on any medicine?",
   "When is my next doctor appointment?",
-  "A man called from the bank asking for my OTP and to install AnyDesk",
-  "I feel dizzy and a bit of chest pain",
+  "A man from the bank is still on the line asking for my OTP",
+  "I feel a bit dizzy today",
 ];
 
 export default function App() {
@@ -74,8 +74,10 @@ export default function App() {
           else if (e.type === "tool_result") trace({ source: "agent", kind: "tools/call", label: e.name, ok: e.ok, ms: e.ms, detail: e.result });
           else if (e.type === "model") trace({ source: "agent", kind: "model", label: `Bedrock ${e.model} step ${e.step + 1} (${e.stop})`, ok: true, ms: e.ms, detail: e.usage });
           else if (e.type === "warning") trace({ source: "agent", kind: "warning", label: e.message, ok: false });
+          else if (e.type === "safety") trace({ source: "agent", kind: "safety", label: `Safety screen: health ${e.triage}${e.triage_signals.length ? ` (${e.triage_signals.join(", ")})` : ""} · scam ${e.scam}${e.scam_score !== null ? ` (${e.scam_score}/100)` : ""}`, detail: e });
+          else if (e.type === "guard") trace({ source: "agent", kind: "guard", label: `Blocked ${e.name}: ${e.reason}`, ok: false, detail: e.args });
           else if (e.type === "error") { trace({ source: "agent", kind: "error", label: e.message, ok: false }); final = `Sorry, I couldn't reach CareCircle. ${e.message}`; }
-          else if (e.type === "final") { final = e.text; trace({ source: "agent", kind: "final", label: `${e.mode === "bedrock" ? "Bedrock" : "Rule"} agent replied in ${e.total_ms} ms`, ok: true }); }
+          else if (e.type === "final") { final = e.text; trace({ source: "agent", kind: "final", label: `${e.mode === "bedrock" ? "Bedrock agent" : e.mode === "safety-screen" ? "Safety screen" : "Rule agent"} replied in ${e.total_ms} ms`, ok: true }); }
         }
       }
     } catch (e: any) {
