@@ -112,7 +112,7 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     }
     const p = await call("request_refill", { medication: target });
     if (!p.ok) return medError(p, target!) ?? `I couldn't prepare that: ${err(p)}`;
-    return `${lead}I can ${lc(p.data.summary).replace(/\.$/, "")}. Shall I go ahead?`;
+    return outcome(p.data, `${lead}I can ${lc(p.data.summary).replace(/\.$/, "")}. Shall I go ahead?`);
   }
 
   // ---- 6. Appointments ----
@@ -125,7 +125,7 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
       if (!match) return appts.length ? `Which appointment: ${list(appts.map((a) => `${a.title} on ${a.starts_at}`))}?` : "You have no appointments to cancel.";
       const p = await call("cancel_appointment", { appointment_id: match.id });
       if (!p.ok) return `I couldn't prepare that: ${err(p)}`;
-      return `I can cancel your ${match.title} on ${match.starts_at}. Shall I go ahead?`;
+      return outcome(p.data, `I can cancel your ${match.title} on ${match.starts_at}. Shall I go ahead?`);
     }
     if (/\b(pick me up|ride|drive me|take me|lift|transport)\b/.test(lower)) {
       const a = match ?? appts[0];
@@ -182,6 +182,15 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
 }
 
 // ---------- helpers ----------
+/** Reply for a consequential action: decided via MCP elicitation, or still waiting for a spoken yes. */
+function outcome(d: any, askText: string) {
+  if (d.confirmed_via === "mcp_elicitation") {
+    if (d.status === "done") return `Done. ${d.summary.replace(/.$/, "")}.`;
+    if (d.status === "cancelled") return "Okay, I haven't done anything.";
+    return "I didn't get an answer, so I haven't done anything. It's saved as a request your family can approve.";
+  }
+  return askText;
+}
 // A known medicine word, or the unknown word after "my" (so "aspirin" reaches the
 // server and comes back as MEDICATION_NOT_FOUND instead of being silently ignored).
 function medRef(lower: string): string | null {

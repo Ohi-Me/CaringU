@@ -1,6 +1,8 @@
 import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { resolve } from "node:path";
 import { openDb } from "./db.js";
 import { buildMcpServer } from "./mcp.js";
@@ -21,25 +23,54 @@ if (!db.prepare("SELECT 1 FROM people LIMIT 1").get()) resetDemo(db, clock());
 const app = express();
 app.use(express.json({ limit: "256kb" }));
 
-// ---- MCP endpoint: Streamable HTTP, stateless (fresh server+transport per request) ----
+// ---- MCP endpoint: Streamable HTTP with sessions ----
+// Sessions let the server send requests back to the client in the middle of a
+// tool call (elicitation: "Approve this refill?") and route the answer, which
+// arrives as a separate POST, to the same server instance.
+type Session = { transport: StreamableHTTPServerTransport; server: ReturnType<typeof buildMcpServer>; seen: number };
+const sessions = new Map<string, Session>();
+const SESSION_IDLE_MS = 30 * 60_000;
+const rpcError = (code: number, message: string) => ({ jsonrpc: "2.0", error: { code, message }, id: null });
+
 app.post("/mcp", async (req, res) => {
-  const server = buildMcpServer(db, clock);
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-  res.on("close", () => { transport.close(); server.close(); });
+  const sid = req.header("mcp-session-id");
+  let s = sid ? sessions.get(sid) : undefined;
   try {
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    if (sid && !s) return res.status(404).json(rpcError(-32001, "Session not found; initialize a new session."));
+    if (!s) {
+      if (!isInitializeRequest(req.body)) return res.status(400).json(rpcError(-32000, "No session: the first request must be initialize."));
+      const server = buildMcpServer(db, clock);
+      const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => { sessions.set(id, { transport, server, seen: Date.now() }); },
+        onsessionclosed: (id) => { sessions.delete(id); },
+      });
+      transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
+      await server.connect(transport);
+      s = { transport, server, seen: Date.now() };
+    }
+    s.seen = Date.now();
+    await s.transport.handleRequest(req, res, req.body);
   } catch (e) {
     console.error("[mcp]", e);
-    if (!res.headersSent) res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal error" }, id: null });
+    if (!res.headersSent) res.status(500).json(rpcError(-32603, "Internal error"));
   }
 });
-// Stateless server: no standalone SSE stream and no sessions to delete.
-app.get("/mcp", (_req, res) => res.status(405).set("Allow", "POST").json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null }));
-app.delete("/mcp", (_req, res) => res.status(405).set("Allow", "POST").end());
+// GET opens the optional standalone SSE stream; DELETE ends a session.
+const bySession = async (req: express.Request, res: express.Response) => {
+  const s = sessions.get(req.header("mcp-session-id") ?? "");
+  if (!s) return res.status(req.header("mcp-session-id") ? 404 : 400).json(rpcError(-32000, "Missing or unknown Mcp-Session-Id"));
+  s.seen = Date.now();
+  await s.transport.handleRequest(req, res);
+};
+app.get("/mcp", bySession);
+app.delete("/mcp", bySession);
+setInterval(() => {
+  for (const [id, s] of sessions) if (Date.now() - s.seen > SESSION_IDLE_MS) { s.transport.close(); sessions.delete(id); }
+}, 60_000).unref();
 
 // ---- demo/meta endpoints (not part of the MCP surface) ----
-app.get("/api/health", (_req, res) => res.json({ ok: true, mcp: "/mcp", protocol: "2025-11-25", transport: "streamable-http" }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, mcp: "/mcp", protocol: "2025-11-25", transport: "streamable-http", sessions: sessions.size }));
 app.get("/api/activity", (_req, res) => res.json(activityLog(db, 40)));
 app.get("/api/clock", (_req, res) => res.json({ now: clock().toString(), simulated: offsetMs !== 0 }));
 // Demo control: move the demo clock forward (e.g. to show the escalation ladder on camera).

@@ -4,6 +4,8 @@
 import { Router } from "express";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { randomUUID } from "node:crypto";
 import { BedrockRuntimeClient, ConverseCommand, type Message, type Tool } from "@aws-sdk/client-bedrock-runtime";
 import { ruleAgent } from "./ruleAgent.js";
 import { enforce, runScreen, type ScreenOutcome } from "./screen.js";
@@ -25,21 +27,46 @@ export function systemPrompt(now: Date, speaker: string) {
 Current local time: ${now.toString()}. Current speaker: ${speaker}.
 Rules:
 - Facts come ONLY from tool results. Never guess whether a dose was taken; call check_dose_status or get_care_overview.
-- Before recording a dose use record_dose; if it returns DOUBLE_DOSE_RISK, clearly tell the user NOT to take another and that family was told.
-- request_refill, schedule_appointment and cancel_appointment only PROPOSE. Read the summary and ask "Shall I go ahead?". Call confirm_action only after an explicit yes in the user's latest message. Never claim something was done unless a tool result says so.
+- NEVER tell anyone a dose is safe to take. Say what is recorded and when it is scheduled. If they are unsure whether they took it, tell them to check their pill organiser or ask their pharmacist. For a missed dose, never advise taking it late: say the pharmacist or doctor should decide.
+- To log a dose use record_dose (pass taken_at "HH:MM" if they say when). If it returns status=possible_duplicate, ask its question_for_user. Only if they then say they took ANOTHER one, call record_dose with extra_dose_confirmed=true and read its guidance_for_user.
+- request_refill, schedule_appointment and cancel_appointment ask the person for approval themselves when possible. Report the returned status truthfully (done / cancelled / awaiting_confirmation). If the status is awaiting_confirmation, read the summary and ask "Shall I go ahead?"; call confirm_action only after an explicit yes in the user's latest message.
+- Never claim something was done unless a tool result says so.
 - Symptoms: call log_wellbeing. For red flags, tell them to call emergency services (112 India / 911 US) now. Never diagnose or change medication.
 - If someone describes a call/message asking for money, codes, PINs or app installs, call assess_scam_risk.
 - If transport for an appointment is "NOT ARRANGED", offer to message the family.
+- Caregivers (Ravi, Neha) may ask for a summary (get_family_digest) or respond to alerts (respond_to_alert).
 - Use real ids from tool results only. If a request is ambiguous (e.g. which medicine), ask one short question.
 - Replies are spoken aloud: 1-3 short sentences, plain words, no markdown, no lists, no ids.`;
 }
 
-async function connectMcp(url: string, emit: Emit) {
-  const client = new Client({ name: "carecircle-agent", version: "0.1.0" });
+// Human answers to MCP elicitation requests, keyed by a one-time id sent to the browser.
+const pendingElicitations = new Map<string, (answer: { approve: boolean } | null) => void>();
+const ELICIT_TIMEOUT_MS = 110_000;
+
+async function connectMcp(url: string, emit: Emit, opts: { elicitation: boolean; speaker: string }) {
+  const client = new Client({ name: "carecircle-agent", version: "0.2.0" },
+    opts.elicitation ? { capabilities: { elicitation: { form: {} } } } : undefined);
+  if (opts.elicitation) {
+    // The MCP server asks for approval mid-tool-call; we relay the question to the
+    // person on the device and pass their answer straight back. The model never sees it.
+    client.setRequestHandler(ElicitRequestSchema, async (req) => {
+      const id = randomUUID();
+      const message = (req.params as any).message as string;
+      emit({ type: "elicit", id, message });
+      const answer = await new Promise<{ approve: boolean } | null>((resolve) => {
+        pendingElicitations.set(id, resolve);
+        setTimeout(() => { if (pendingElicitations.delete(id)) resolve(null); }, ELICIT_TIMEOUT_MS);
+      });
+      emit({ type: "elicit_answer", id, answer: answer ? (answer.approve ? "approved" : "declined") : "no answer" });
+      if (!answer) return { action: "cancel" };
+      return { action: "accept", content: { approve: answer.approve, answered_by: opts.speaker } };
+    });
+  }
   const transport = new StreamableHTTPClientTransport(new URL(url));
   const t0 = performance.now();
   await client.connect(transport); // sends initialize + notifications/initialized
-  emit({ type: "mcp", method: "initialize", protocolVersion: transport.protocolVersion, server: client.getServerVersion()?.name, ms: Math.round(performance.now() - t0) });
+  emit({ type: "mcp", method: "initialize", protocolVersion: transport.protocolVersion, session: transport.sessionId ? "yes" : "no",
+    elicitation: opts.elicitation, server: client.getServerVersion()?.name, ms: Math.round(performance.now() - t0) });
   const t1 = performance.now();
   const { tools } = await client.listTools();
   emit({ type: "mcp", method: "tools/list", count: tools.length, ms: Math.round(performance.now() - t1) });
@@ -47,7 +74,7 @@ async function connectMcp(url: string, emit: Emit) {
     emit({ type: "tool_call", name, args });
     const t = performance.now();
     try {
-      const r: any = await client.callTool({ name, arguments: args });
+      const r: any = await client.callTool({ name, arguments: args }, undefined, { timeout: ELICIT_TIMEOUT_MS + 15_000 });
       const payload = r.structuredContent ?? JSON.parse(r.content?.[0]?.text ?? "{}");
       emit({ type: "tool_result", name, ok: !r.isError, ms: Math.round(performance.now() - t), result: payload });
       return payload;
@@ -57,7 +84,11 @@ async function connectMcp(url: string, emit: Emit) {
       return payload;
     }
   };
-  return { client, tools, call };
+  const close = async () => {
+    try { await transport.terminateSession(); } catch { /* server may already be gone */ }
+    await client.close().catch(() => {});
+  };
+  return { client, tools, call, close };
 }
 
 export function bedrockConfigured() {
@@ -121,6 +152,15 @@ function guarded(call: CallTool, lastUser: string, emit: Emit): CallTool {
 export function agentRouter(mcpUrl: string, clock: Clock) {
   const r = Router();
   r.get("/mode", (_req, res) => res.json({ mode: bedrockConfigured() ? "bedrock" : "rules", model: bedrockConfigured() ? MODEL_ID : null }));
+  // The device posts the person's answer to a pending elicitation here.
+  r.post("/elicit/:id", (req, res) => {
+    const resolve = pendingElicitations.get(req.params.id);
+    if (!resolve) return res.status(404).json({ ok: false, error: "No pending question with that id (it may have timed out)." });
+    if (typeof req.body?.approve !== "boolean") return res.status(400).json({ ok: false, error: "approve must be true or false" });
+    pendingElicitations.delete(req.params.id);
+    resolve({ approve: req.body.approve });
+    res.json({ ok: true });
+  });
   r.post("/chat", async (req, res) => {
     const history: Turn[] = Array.isArray(req.body?.history) ? req.body.history.filter((t: any) => typeof t?.text === "string").slice(-20) : [];
     const speaker = typeof req.body?.speaker === "string" ? req.body.speaker.slice(0, 60) : "Asha (voice)";
@@ -130,7 +170,7 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
     const t0 = performance.now();
     let mcp: Awaited<ReturnType<typeof connectMcp>> | undefined;
     try {
-      mcp = await connectMcp(mcpUrl, emit);
+      mcp = await connectMcp(mcpUrl, emit, { elicitation: req.body?.elicitation === true, speaker });
       const lastUser = history[history.length - 1].text;
       const screen = await runScreen(lastUser, speaker, mcp.call, emit);
       let text: string, mode = bedrockConfigured() ? "bedrock" : "rules";
@@ -154,7 +194,7 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
     } catch (e: any) {
       emit({ type: "error", message: `Could not reach the CareCircle MCP server: ${e?.message ?? e}` });
     } finally {
-      await mcp?.client.close().catch(() => {});
+      await mcp?.close();
       res.end();
     }
   });

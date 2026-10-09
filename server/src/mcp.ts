@@ -7,26 +7,78 @@ import type { DB } from "./db.js";
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Local date YYYY-MM-DD; omit for today");
 const actor = z.string().min(1).max(60).optional().describe("Who is speaking, e.g. 'Asha (voice)' or 'Ravi (son)'");
 
+type Confirmation =
+  | { asked: false }
+  | { asked: true; outcome: "approved" | "declined" | "no_answer"; by: string | null };
+
+interface Ctx { confirm: (message: string) => Promise<Confirmation> }
+
 export function buildMcpServer(db: DB, clock: care.Clock) {
   const server = new McpServer(
-    { name: "carecircle", title: "CareCircle", version: "0.1.0" },
-    { instructions: "Tools for a voice assistant that helps an older adult manage medicines, appointments and wellbeing while keeping family caregivers informed. All data is sample/demo data. Never diagnose; red-flag symptoms must be escalated. Consequential actions return a confirmation_id and only happen after confirm_action." },
+    { name: "carecircle", title: "CareCircle", version: "0.2.0" },
+    { instructions: "Tools for a voice assistant that helps an older adult manage medicines, appointments and wellbeing while keeping family caregivers informed. All data is sample/demo data. Never diagnose; red-flag symptoms must be escalated. Consequential actions (refills, appointment changes) ask the human directly through MCP elicitation when the client supports it; otherwise they return a confirmation_id and only happen after confirm_action." },
   );
 
-  // Wraps a handler: validates via zod (done by the SDK), times it, writes an audit
-  // row, and maps domain errors to a structured isError result.
+  /**
+   * Asks the human to approve an action via MCP elicitation (elicitation/create,
+   * form mode). The request travels on the SSE stream of the in-flight tools/call,
+   * so it reaches whoever is driving this session (her device or the dashboard),
+   * never the language model. Returns asked=false if the client can't elicit.
+   */
+  async function confirmWithHuman(extra: any, message: string): Promise<Confirmation> {
+    if (!server.server.getClientCapabilities()?.elicitation?.form) return { asked: false };
+    try {
+      const r = await server.server.elicitInput({
+        mode: "form", message,
+        requestedSchema: {
+          type: "object",
+          properties: {
+            approve: { type: "boolean", title: "Approve", description: message },
+            answered_by: { type: "string", title: "Who is answering", description: "Name of the person approving or declining" },
+          },
+          required: ["approve"],
+        },
+      }, { relatedRequestId: extra.requestId, timeout: 120_000 });
+      const by = typeof r.content?.answered_by === "string" ? r.content.answered_by.slice(0, 60) : null;
+      if (r.action === "accept") return { asked: true, outcome: r.content?.approve === true ? "approved" : "declined", by };
+      return { asked: true, outcome: r.action === "decline" ? "declined" : "no_answer", by };
+    } catch {
+      return { asked: true, outcome: "no_answer", by: null }; // timeout or client gone: do nothing
+    }
+  }
+
+  /** Proposal -> human decision via elicitation -> executed or cancelled, all inside one tools/call. */
+  async function withConfirmation(ctx: Ctx, proposal: { confirmation_id: string; summary: string; status: string }) {
+    const c = await ctx.confirm(proposal.summary.replace(/\.$/, "") + "?");
+    if (!c.asked) return proposal; // client can't elicit: two-phase confirm_action flow
+    if (c.outcome === "no_answer")
+      return { ...proposal, confirmed_via: "mcp_elicitation", elicitation: "no_answer", next_step: "Nobody answered. Nothing was done; the request is still pending and can be approved later." };
+    const done = care.resolvePending(db, clock(), proposal.confirmation_id, c.outcome === "approved", c.by ?? "user (via device)");
+    return { ...done, confirmed_via: "mcp_elicitation", answered_by: c.by };
+  }
+
+  // Wraps a handler: validates via zod (done by the SDK), times it (excluding time
+  // spent waiting for a human), writes an audit row, and maps domain errors to a
+  // structured isError result.
   function tool<S extends z.ZodRawShape>(
     name: string, cfg: { title: string; description: string; input: S; readOnly?: boolean; destructive?: boolean },
-    fn: (args: z.infer<z.ZodObject<S>>, now: Date) => unknown,
+    fn: (args: z.infer<z.ZodObject<S>>, now: Date, ctx: Ctx) => unknown,
   ) {
     server.registerTool(name, {
       title: cfg.title, description: cfg.description, inputSchema: cfg.input,
       annotations: { readOnlyHint: !!cfg.readOnly, destructiveHint: !!cfg.destructive, openWorldHint: false },
-    }, (async (args: any) => {
+    }, (async (args: any, extra: any) => {
       const t0 = performance.now();
+      let humanMs = 0;
+      const ctx: Ctx = {
+        confirm: async (message) => {
+          const h = performance.now();
+          try { return await confirmWithHuman(extra, message); } finally { humanMs += performance.now() - h; }
+        },
+      };
       let ok = true, code: string | null = null, payload: unknown;
       try {
-        payload = { ok: true, data: fn(args, clock()) };
+        payload = { ok: true, data: await fn(args, clock(), ctx) };
       } catch (e) {
         ok = false;
         if (e instanceof care.ToolError) {
@@ -38,7 +90,7 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
           payload = { ok: false, error: { code: "INTERNAL", message: "Internal error; nothing may have been saved.", retryable: true } };
         }
       }
-      const latency = Math.round((performance.now() - t0) * 100) / 100;
+      const latency = Math.round((performance.now() - t0 - humanMs) * 100) / 100;
       db.prepare("INSERT INTO audit (at, tool, args, ok, code, latency_ms) VALUES (?,?,?,?,?,?)")
         .run(clock().toISOString(), name, JSON.stringify(redact(args)), ok ? 1 : 0, code, latency);
       return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload as Record<string, unknown>, isError: !ok };
@@ -82,9 +134,9 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
 
   tool("request_refill", {
     title: "Request a refill (needs confirmation)",
-    description: "PROPOSES a pharmacy refill request. Nothing is sent until confirm_action is called with the returned confirmation_id after the user says yes. No payment is ever made.",
+    description: "Requests a pharmacy refill, gated on human approval. If the client supports MCP elicitation the server asks the person directly and returns the final status (done / cancelled / no answer). Otherwise it returns status=awaiting_confirmation and a confirmation_id for confirm_action after the user says yes. No payment is ever made.",
     input: { medication: z.string().min(1).max(80), quantity: z.number().int().min(1).max(180).optional() },
-  }, (a, now) => care.proposeRefill(db, now, a.medication, a.quantity));
+  }, (a, now, ctx) => withConfirmation(ctx, care.proposeRefill(db, now, a.medication, a.quantity)));
 
   tool("list_appointments", {
     title: "List appointments", readOnly: true,
@@ -94,19 +146,22 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
 
   tool("schedule_appointment", {
     title: "Schedule appointment (needs confirmation)",
-    description: "PROPOSES adding an appointment and reports clashes within 2 hours. Saved only after confirm_action.",
+    description: "Adds an appointment after human approval (MCP elicitation, or confirmation_id + confirm_action for clients without elicitation). Reports clashes within 2 hours.",
     input: {
       title: z.string().min(2).max(120), starts_at: z.string().describe("Local 'YYYY-MM-DD HH:MM'"),
       location: z.string().max(120).optional(), with_whom: z.string().max(80).optional(),
       transport: z.string().max(120).optional(), notes: z.string().max(300).optional(),
     },
-  }, (a, now) => care.proposeAppointment(db, now, a));
+  }, async (a, now, ctx) => {
+    const p = care.proposeAppointment(db, now, a);
+    return { ...(await withConfirmation(ctx, p)), conflicts_within_2h: (p as any).conflicts_within_2h };
+  });
 
   tool("cancel_appointment", {
     title: "Cancel appointment (needs confirmation)", destructive: true,
-    description: "PROPOSES cancelling an appointment by its real id (from list_appointments). Cancelled only after confirm_action.",
+    description: "Cancels an appointment by its real id (from list_appointments) after human approval (MCP elicitation, or confirmation_id + confirm_action for clients without elicitation).",
     input: { appointment_id: z.string().min(3).max(40) },
-  }, (a, now) => care.proposeCancelAppointment(db, now, a.appointment_id));
+  }, (a, now, ctx) => withConfirmation(ctx, care.proposeCancelAppointment(db, now, a.appointment_id)));
 
   tool("confirm_action", {
     title: "Confirm or cancel a pending action",
