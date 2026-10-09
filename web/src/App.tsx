@@ -27,6 +27,8 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
   const recRef = useRef<any>(null);
+  const orbRef = useRef<Orb>("idle");
+  orbRef.current = orb;
 
   useEffect(() => onTrace((e) => setEvents((xs) => [e, ...xs].slice(0, 200))), []);
   useEffect(() => { fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null)); }, []);
@@ -40,11 +42,35 @@ export default function App() {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.95;
-    u.onend = () => setOrb("idle");
-    u.onerror = () => setOrb("idle");
+    // Some browsers never fire onend (no voices, background tab); don't let the device get stuck "speaking".
+    const fallback = setTimeout(() => setOrb((o) => (o === "speaking" ? "idle" : o)), 1500 + text.split(/\s+/).length * 450);
+    u.onend = () => { clearTimeout(fallback); setOrb("idle"); };
+    u.onerror = () => { clearTimeout(fallback); setOrb("idle"); };
     setOrb("speaking");
     speechSynthesis.speak(u);
   }, [voiceOn]);
+
+  // Her device: speak caregiver replies and escalation notices as they arrive (via MCP).
+  useEffect(() => {
+    const t = setInterval(async () => {
+      if (orbRef.current !== "idle") return;
+      const r = await callTool<any[]>("get_announcements", {}, true);
+      if (!r.ok || !r.data.length) return;
+      const msgs = r.data;
+      setTurns((ts) => [...ts, ...msgs.map((m) => ({ role: "assistant" as const, text: m.text }))]);
+      trace({ source: "dashboard", kind: "announce", label: `Spoken on her device: ${msgs.map((m) => m.text).join(" ")}`, ok: true });
+      speak(msgs.map((m) => m.text).join(" "));
+      await callTool("mark_announcements_heard", { message_ids: msgs.map((m) => m.message_id) }, true);
+      setTick((x) => x + 1);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [speak]);
+
+  const advance = async (minutes: number) => {
+    const r = await fetch("/api/clock/advance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minutes }) }).then((x) => x.json()).catch(() => null);
+    if (r?.ok) trace({ source: "dashboard", kind: "clock", label: `Demo clock +${minutes} min${r.escalated?.length ? ` → escalated ${r.escalated.length} alert(s)` : ""}`, ok: true });
+    setTick((x) => x + 1);
+  };
 
   const send = useCallback(async (text: string) => {
     text = text.trim();
@@ -132,6 +158,7 @@ export default function App() {
           </span>
           <span className="pill pill-muted">MCP 2025-11-25 · Streamable HTTP</span>
           {clock && <span className={`pill ${clock.simulated ? "pill-warn" : "pill-muted"}`} title={clock.now}>{clock.simulated ? "Demo time " : "Time "}{new Date(clock.now).toTimeString().slice(0, 5)}</span>}
+          <button className="ghost" onClick={() => advance(3)} title="Move the demo clock forward 3 minutes (shows escalation)">+3 min</button>
           <button className="ghost" onClick={() => reset("10:00")} title="Reset sample data and start at 10:00">Reset demo (10:00)</button>
           <button className="ghost" onClick={() => reset()} title="Reset sample data using the real time">Reset (now)</button>
         </div>
@@ -184,7 +211,7 @@ export default function App() {
 
         <section className={`side ${mobilePane === "side" ? "" : "hide-mobile"}`}>
           <div className="tabs desktop-only" role="tablist">
-            <button role="tab" aria-selected={tab === "family"} onClick={() => setTab("family")}>Family dashboard</button>
+            <button role="tab" aria-selected={tab === "family"} onClick={() => setTab("family")}>Family (Ravi / Neha)</button>
             <button role="tab" aria-selected={tab === "trace"} onClick={() => setTab("trace")}>MCP trace {events.length ? `(${events.length})` : ""}</button>
           </div>
           {tab === "family" ? <Family tick={tick} /> : <Trace events={events} />}
@@ -198,12 +225,53 @@ export default function App() {
 }
 
 // ---------------- Family dashboard (talks MCP directly from the browser) ----------------
+const QUICK_REPLIES = ["Don't share anything. I'll call you in 2 minutes.", "Stay seated, help is coming.", "Please hang up the phone now."];
+
+function AlertCard({ a, me, busy, act }: { a: any; me: string; busy: boolean; act: (k: string, n: string, args: Record<string, unknown>) => Promise<void> }) {
+  const [msg, setMsg] = useState("");
+  const respond = (action: string, message?: string) => act(a.id, "respond_to_alert", { alert_id: a.id, responder: me, action, ...(message ? { message } : {}) });
+  const live = a.severity === "urgent" && !a.claimed_by;
+  return (
+    <div className={`alert sev-${a.severity} ${live ? "live" : ""}`}>
+      <div className="alert-body">
+        <div className="alert-head">
+          <span className="sev">{a.severity}</span> <span className="when">{a.at.split(" ")[1]}</span>
+          {a.severity === "urgent" && <span className="chain">Notified: {a.notified.join(" → ")}{a.escalates_at && !a.claimed_by ? ` · next: escalates at ${a.escalates_at.split(" ")[1]}` : ""}</span>}
+        </div>
+        <p>{a.message}</p>
+        {a.claimed_by && <p className="claimed">✓ {a.claimed_by}: {String(a.claimed_action).replace(/_/g, " ")}</p>}
+        {live && (
+          <div className="respond">
+            <div className="btns">
+              <button disabled={busy} onClick={() => respond("calling_now")}>I'm calling her now</button>
+              <button className="ghost" disabled={busy} onClick={() => respond("on_my_way")}>On my way</button>
+            </div>
+            <div className="quick">
+              {QUICK_REPLIES.map((q) => <button key={q} className="chip" disabled={busy} onClick={() => respond("will_call_soon", q)}>{q}</button>)}
+            </div>
+            <form className="ask" onSubmit={(e) => { e.preventDefault(); if (msg.trim()) { respond("will_call_soon", msg.trim()); setMsg(""); } }}>
+              <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Message to speak on her device…" aria-label="Message to her" />
+              <button type="submit" disabled={busy || !msg.trim()}>Send</button>
+            </form>
+          </div>
+        )}
+        {a.timeline?.length > 1 && (
+          <details className="timeline-d"><summary>Timeline ({a.timeline.length})</summary>
+            {a.timeline.map((e: any, i: number) => <p key={i} className="small"><b>{e.at}</b> {e.event}: {e.detail}</p>)}
+          </details>
+        )}
+      </div>
+      {!live && <button className="ghost" disabled={busy} onClick={() => act(a.id, "acknowledge_alert", { alert_id: a.id, acknowledged_by: me })}>Handled</button>}
+    </div>
+  );
+}
+
 function Family({ tick }: { tick: number }) {
   const [d, setD] = useState<any>(null);
   const [ov, setOv] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const me = "Ravi (son)";
+  const [me, setMe] = useState("Ravi (son)");
 
   const load = useCallback(async (quiet = true) => {
     const [a, b] = await Promise.all([callTool("get_family_digest", {}, quiet), callTool("get_care_overview", {}, quiet)]);
@@ -226,6 +294,12 @@ function Family({ tick }: { tick: number }) {
   const pct = d.adherence.adherence_so_far_pct;
   return (
     <div className="family">
+      <div className="viewer">
+        <label>Family view as{" "}
+          <select value={me} onChange={(e) => setMe(e.target.value)}><option>Ravi (son)</option><option>Neha (daughter)</option></select>
+        </label>
+        <span className="muted small">Urgent alerts go to Ravi first, then Neha if nobody responds.</span>
+      </div>
       <div className="card stats">
         <Stat label="Doses taken today" value={`${d.adherence.taken}/${d.adherence.scheduled_today}`} />
         <Stat label="Missed" value={d.adherence.missed} tone={d.adherence.missed ? "warn" : undefined} />
@@ -251,12 +325,16 @@ function Family({ tick }: { tick: number }) {
       <div className="card">
         <h2>Alerts</h2>
         {d.open_alerts.length === 0 ? <p className="muted">All clear.</p> : d.open_alerts.map((a: any) => (
-          <div key={a.id} className={`alert sev-${a.severity}`}>
-            <div><span className="sev">{a.severity}</span> <span className="when">{a.at.split(" ")[1]}</span><p>{a.message}</p></div>
-            <button className="ghost" disabled={busy === a.id} onClick={() => act(a.id, "acknowledge_alert", { alert_id: a.id, acknowledged_by: me })}>Handled</button>
-          </div>
+          <AlertCard key={a.id} a={a} me={me} busy={busy === a.id} act={act} />
         ))}
       </div>
+
+      {d.messages_to_her?.length > 0 && (
+        <div className="card">
+          <h2>Said to her device</h2>
+          {d.messages_to_her.map((m: any, i: number) => <p key={i} className="small"><b>{m.at}</b> {m.text} <span className="muted">{m.heard ? "· spoken" : "· waiting"}</span></p>)}
+        </div>
+      )}
 
       <div className="card">
         <h2>Today's medicines</h2>

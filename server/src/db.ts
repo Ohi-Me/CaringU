@@ -52,10 +52,27 @@ export function openDb(path: string): DB {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
-  // Migration for databases created before the extra-dose column existed.
-  const cols = db.prepare("PRAGMA table_info(dose_log)").all() as { name: string }[];
-  if (!cols.some((c) => c.name === "extra")) db.exec("ALTER TABLE dose_log ADD COLUMN extra INTEGER NOT NULL DEFAULT 0");
+  // Additive migrations for databases created by earlier versions.
+  addColumn(db, "dose_log", "extra", "INTEGER NOT NULL DEFAULT 0");
+  addColumn(db, "people", "priority", "INTEGER");               // escalation order for caregivers (1 = first)
+  addColumn(db, "alerts", "escalation_level", "INTEGER NOT NULL DEFAULT 0");
+  addColumn(db, "alerts", "next_escalation_at", "TEXT");
+  addColumn(db, "alerts", "claimed_by", "TEXT");                 // caregiver who said "I'm calling her" etc.
+  addColumn(db, "alerts", "claimed_action", "TEXT");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS alert_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id TEXT NOT NULL, at TEXT NOT NULL, event TEXT NOT NULL, detail TEXT
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY, at TEXT NOT NULL, from_name TEXT NOT NULL, to_elder INTEGER NOT NULL DEFAULT 1,
+      text TEXT NOT NULL, alert_id TEXT, heard_at TEXT
+    );`);
   return db;
+}
+
+function addColumn(db: DB, table: string, column: string, decl: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

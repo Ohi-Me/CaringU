@@ -2,18 +2,19 @@
 // so the demo always shows a believable state (one missed dose, one low refill,
 // an appointment tomorrow with no transport arranged).
 import { type DB, tx } from "./db.js";
+import { logEvent } from "./family.js";
 
 const HOUR = 3_600_000;
 
 export function resetDemo(db: DB, now: Date) {
   tx(db, () => {
-    for (const t of ["dose_log", "refills", "pending_actions", "alerts", "wellbeing", "appointments", "medications", "people", "audit"])
+    for (const t of ["dose_log", "refills", "pending_actions", "alert_events", "messages", "alerts", "wellbeing", "appointments", "medications", "people", "audit"])
       db.exec(`DELETE FROM ${t}`);
 
-    const person = db.prepare("INSERT INTO people (id, name, role, relation, phone) VALUES (?,?,?,?,?)");
-    person.run("p_asha", "Asha Mehra", "elder", "self", null);
-    person.run("p_ravi", "Ravi", "caregiver", "son", "+91-00000-00001");
-    person.run("p_neha", "Neha", "caregiver", "daughter", "+91-00000-00002");
+    const person = db.prepare("INSERT INTO people (id, name, role, relation, phone, priority) VALUES (?,?,?,?,?,?)");
+    person.run("p_asha", "Asha Mehra", "elder", "self", null, null);
+    person.run("p_ravi", "Ravi", "caregiver", "son", "+91-00000-00001", 1);
+    person.run("p_neha", "Neha", "caregiver", "daughter", "+91-00000-00002", 2);
 
     const med = db.prepare(`INSERT INTO medications (id, name, dose, purpose, times, min_gap_hours, pills_left, pills_per_dose, with_food)
       VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -49,5 +50,6 @@ export function resetDemo(db: DB, now: Date) {
 
     db.prepare("INSERT INTO alerts (id, at, severity, kind, message) VALUES (?,?,?,?,?)")
       .run("alert_seed_1", new Date(now.getTime() - 14 * HOUR).toISOString(), "warning", "missed_dose", "Metformin 20:30 was not recorded yesterday.");
+    logEvent(db, "alert_seed_1", new Date(now.getTime() - 14 * HOUR), "notified", "family dashboard (Ravi, Neha)");
   });
 }

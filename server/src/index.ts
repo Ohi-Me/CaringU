@@ -7,6 +7,7 @@ import { buildMcpServer } from "./mcp.js";
 import { resetDemo } from "./seed.js";
 import { activityLog, type Clock } from "./care.js";
 import { agentRouter } from "./agent.js";
+import { runEscalations } from "./family.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
@@ -41,6 +42,14 @@ app.delete("/mcp", (_req, res) => res.status(405).set("Allow", "POST").end());
 app.get("/api/health", (_req, res) => res.json({ ok: true, mcp: "/mcp", protocol: "2025-11-25", transport: "streamable-http" }));
 app.get("/api/activity", (_req, res) => res.json(activityLog(db, 40)));
 app.get("/api/clock", (_req, res) => res.json({ now: clock().toString(), simulated: offsetMs !== 0 }));
+// Demo control: move the demo clock forward (e.g. to show the escalation ladder on camera).
+app.post("/api/clock/advance", (req, res) => {
+  const minutes = Number(req.body?.minutes);
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 24 * 60) return res.status(400).json({ ok: false, error: "minutes must be 1-1440" });
+  offsetMs += minutes * 60_000;
+  const escalated = runEscalations(db, clock());
+  res.json({ ok: true, now: clock().toString(), simulated: true, escalated });
+});
 app.post("/api/reset", (req, res) => {
   const time = req.body?.time;
   if (time !== undefined && (typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)))
@@ -61,5 +70,8 @@ if (existsSync(webDist)) {
   app.use(express.static(webDist));
   app.get(/^\/(?!api|mcp).*/, (_req, res) => res.sendFile(resolve(webDist, "index.html")));
 }
+
+// Escalations also advance on their own, not only when someone reads the alerts.
+setInterval(() => { try { runEscalations(db, clock()); } catch (e) { console.error("[escalation]", e); } }, 15_000).unref();
 
 app.listen(PORT, () => console.log(`CareCircle on http://localhost:${PORT}  (MCP: /mcp)`));

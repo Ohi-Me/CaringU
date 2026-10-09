@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { type DB, tx } from "./db.js";
 import { screenScam, triageText } from "./safety.js";
+import * as family from "./family.js";
 
 export class ToolError extends Error {
   constructor(public code: string, message: string, public retryable = false, public details?: unknown) {
@@ -208,7 +209,7 @@ export function careOverview(db: DB, now: Date, date?: string) {
     missed_dose_guidance: schedule.some((s) => s.status === "missed") ? MISSED_DOSE_GUIDANCE : null,
     basis: RECORD_BASIS,
     appointments: listAppointments(db, now, ymd(day), 1),
-    open_alerts: listAlerts(db, false).slice(0, 5),
+    open_alerts: listAlerts(db, false, now).slice(0, 5),
     pending_confirmations: listPending(db),
   };
 }
@@ -340,7 +341,7 @@ export function logWellbeing(db: DB, now: Date, mood: string | undefined, sympto
   if (t.triage === "urgent") alert = raiseAlert(db, now, "urgent", "red_flag_symptom", `Possible emergency (${t.signals.join(", ")}): "${symptoms}". Call her now.`);
   else if (t.triage === "watch") alert = raiseAlert(db, now, "warning", "symptom", `Symptom reported (${t.signals.join(", ")}): "${symptoms}"${mood ? ` (mood: ${mood})` : ""}`);
   return {
-    entry_id: wid, triage: t.triage, signals: t.signals, family_alerted: !!alert, alert_id: alert?.alert_id ?? null,
+    entry_id: wid, triage: t.triage, signals: t.signals, family_alerted: !!alert, alert_id: alert?.alert_id ?? null, notified: alert?.notified ?? [],
     say_first: t.triage === "urgent" ? EMERGENCY_LINE : null,
     guidance: t.triage === "urgent"
       ? "Start the reply with say_first. Family has been alerted. Do NOT diagnose or suggest waiting."
@@ -351,12 +352,20 @@ export function logWellbeing(db: DB, now: Date, mood: string | undefined, sympto
 
 export function assessScam(db: DB, now: Date, text: string, channel = "call") {
   const s = screenScam(text);
-  let alert = null;
-  if (s.verdict !== "no_strong_signals")
-    alert = raiseAlert(db, now, s.verdict === "likely_scam" ? "urgent" : "warning", "scam_guard",
-      `${s.verdict === "likely_scam" ? "Likely" : "Possible"} ${s.scam_type ?? ""} scam by ${channel}${s.in_progress ? " — the caller is STILL ON THE LINE" : ""} (risk ${s.risk_score}/100): ${s.signals.join("; ")}.`);
+  let alert: { alert_id: string; notified: string[] } | null = null;
+  if (s.verdict !== "no_strong_signals") {
+    // Several messages about the same incident update one open alert instead of creating new ones.
+    const open = db.prepare("SELECT * FROM alerts WHERE kind='scam_guard' AND acknowledged_at IS NULL AND at > ? ORDER BY at DESC LIMIT 1")
+      .get(new Date(now.getTime() - 15 * 60_000).toISOString()) as Row | undefined;
+    if (open) {
+      family.logEvent(db, open.id, now, "update", `She described more: ${s.signals.join("; ")}${s.in_progress ? " (caller still on the line)" : ""}`);
+      alert = { alert_id: open.id, notified: family.notifiedSoFar(db, open) };
+    } else
+      alert = raiseAlert(db, now, s.verdict === "likely_scam" ? "urgent" : "warning", "scam_guard",
+        `${s.verdict === "likely_scam" ? "Likely" : "Possible"} ${s.scam_type ?? ""} scam by ${channel}${s.in_progress ? " — the caller is STILL ON THE LINE" : ""} (risk ${s.risk_score}/100): ${s.signals.join("; ")}.`);
+  }
   return {
-    ...s, channel, family_alerted: !!alert, alert_id: alert?.alert_id ?? null,
+    ...s, channel, family_alerted: !!alert, alert_id: alert?.alert_id ?? null, notified: alert?.notified ?? [],
     say_first: s.verdict === "likely_scam" ? (s.in_progress ? "Hang up now." : "This looks like a scam.") : null,
     advice: s.verdict === "no_strong_signals"
       ? "No strong scam signals. Still: never share codes or PINs, and if unsure call back on an official number you already have."
@@ -369,21 +378,47 @@ export function assessScam(db: DB, now: Date, text: string, channel = "call") {
 export function raiseAlert(db: DB, now: Date, severity: "info" | "warning" | "urgent", kind: string, message: string) {
   const aid = id("alert");
   db.prepare("INSERT INTO alerts (id, at, severity, kind, message) VALUES (?,?,?,?,?)").run(aid, now.toISOString(), severity, kind, message);
-  return { alert_id: aid, severity, kind, message };
+  family.startEscalation(db, aid, severity, now);
+  return { alert_id: aid, severity, kind, message, notified: family.notifiedSoFar(db, { severity, escalation_level: severity === "urgent" ? 1 : 0 }) };
 }
 
-export function listAlerts(db: DB, includeAcknowledged: boolean) {
+export function listAlerts(db: DB, includeAcknowledged: boolean, now?: Date) {
+  if (now) family.runEscalations(db, now);
   return (db.prepare(`SELECT * FROM alerts ${includeAcknowledged ? "" : "WHERE acknowledged_at IS NULL"} ORDER BY at DESC LIMIT 50`).all() as Row[])
-    .sort((a, b) => sev(b.severity) - sev(a.severity) || b.at.localeCompare(a.at))
+    .sort((a, b) => Number(!!a.claimed_by) - Number(!!b.claimed_by) || sev(b.severity) - sev(a.severity) || b.at.localeCompare(a.at))
     .map((a) => ({ id: a.id, at: localStamp(a.at), severity: a.severity, kind: a.kind, message: a.message,
-      acknowledged_by: a.acknowledged_by }));
+      acknowledged_by: a.acknowledged_by, claimed_by: a.claimed_by, claimed_action: a.claimed_action,
+      notified: family.notifiedSoFar(db, a),
+      escalates_at: a.next_escalation_at ? localStamp(a.next_escalation_at) : null,
+      timeline: family.alertTimeline(db, a.id) }));
 }
 const sev = (s: string) => ({ urgent: 3, warning: 2, info: 1 } as Record<string, number>)[s] ?? 0;
 
 export function acknowledgeAlert(db: DB, now: Date, alertId: string, by: string) {
-  const r = db.prepare("UPDATE alerts SET acknowledged_by=?, acknowledged_at=? WHERE id=? AND acknowledged_at IS NULL").run(by, now.toISOString(), alertId);
+  const r = db.prepare("UPDATE alerts SET acknowledged_by=?, acknowledged_at=?, next_escalation_at=NULL WHERE id=? AND acknowledged_at IS NULL").run(by, now.toISOString(), alertId);
   if (r.changes !== 1) throw new ToolError("ALERT_NOT_FOUND", `No open alert ${alertId}.`);
+  family.logEvent(db, alertId, now, "handled", by);
   return { alert_id: alertId, acknowledged_by: by };
+}
+
+export function respondToAlert(db: DB, now: Date, alertId: string, responder: string, action: "calling_now" | "on_my_way" | "will_call_soon" | "handled", message?: string) {
+  const r = family.respondToAlert(db, now, alertId, responder, action, message);
+  if (!r) throw new ToolError("ALERT_NOT_FOUND", `No alert ${alertId}. Use list_alerts for real ids.`);
+  if (r.already) throw new ToolError("ALREADY_CLAIMED", `${r.claimed_by} is already handling this alert (${String(r.action).replace(/_/g, " ")}).`, false, r);
+  return r;
+}
+
+export function sendMessageToElder(db: DB, now: Date, from: string, text: string) {
+  return { ...family.sendToElder(db, now, from.split(" ")[0], `Message from ${from.split(" ")[0]}: ${text}`), delivery: "spoken aloud on her CareCircle device" };
+}
+
+export function getAnnouncements(db: DB, now: Date) {
+  family.runEscalations(db, now);
+  return family.pendingAnnouncements(db);
+}
+
+export function markAnnouncementsHeard(db: DB, now: Date, ids: string[]) {
+  return { marked: family.markHeard(db, now, ids) };
 }
 
 export function familyDigest(db: DB, now: Date, date?: string) {
@@ -399,7 +434,8 @@ export function familyDigest(db: DB, now: Date, date?: string) {
       adherence_so_far_pct: due ? Math.round((o.counts.taken / due) * 100) : null },
     missed: o.medication_schedule.filter((s) => s.status === "missed").map((s) => `${s.medication} ${s.time}`),
     wellbeing: wb,
-    open_alerts: listAlerts(db, false),
+    open_alerts: listAlerts(db, false, now),
+    messages_to_her: family.recentMessages(db, 5),
     upcoming_appointments: listAppointments(db, now, undefined, 7),
     refills_needed: forecastRefills(db, now, 7).filter((r) => r.needs_refill),
     people: db.prepare("SELECT id, name, role, relation FROM people").all(),

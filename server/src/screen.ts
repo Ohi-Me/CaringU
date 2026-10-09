@@ -31,7 +31,7 @@ export async function runScreen(text: string, speaker: string, call: CallTool, e
     out.wellbeingLogged = r?.ok === true;
     if (triage.triage === "urgent") {
       out.terminalReply = r?.ok
-        ? `${EMERGENCY_LINE} I've alerted Ravi and Neha. Stay where you are; if you can, unlock the door.`
+        ? `${EMERGENCY_LINE} I've alerted ${who(r)}. Stay where you are; if you can, unlock the door.`
         : `${EMERGENCY_LINE} I could not reach your family through CareCircle, so please call 112 yourself now.`;
       return out;
     }
@@ -43,13 +43,18 @@ export async function runScreen(text: string, speaker: string, call: CallTool, e
     out.scamChecked = true;
     if (scam.verdict === "likely_scam") {
       const why = scam.signals.slice(0, 2).join(", and it ");
-      out.terminalReply = `${scam.in_progress ? "Hang up now. " : ""}This looks like a scam: it ${why}. Don't share any code or PIN, and don't pay, scan or install anything. Real banks and police never ask for that on the phone.${r?.ok ? " I've alerted Ravi and Neha." : " I couldn't alert your family, so please call Ravi yourself."}`;
+      out.terminalReply = `${scam.in_progress ? "Hang up now. " : ""}This looks like a scam: it ${why}. Don't share any code or PIN, and don't pay, scan or install anything. Real banks and police never ask for that on the phone.${r?.ok ? ` I've alerted ${who(r)}.` : " I couldn't alert your family, so please call Ravi yourself."}`;
       return out;
     }
     out.notes.push(`assess_scam_risk was already called (verdict: suspicious; signals: ${scam.signals.join("; ")}); family warned. Tell the user not to share codes or pay, and to call back on an official number.`);
   }
   return out;
 }
+
+const who = (r: any) => {
+  const n: string[] = r?.data?.notified ?? [];
+  return n.length ? (n.length === 1 ? n[0] : `${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`) : "your family";
+};
 
 /** Last line of defence for LLM replies: the safety instruction must be in the reply. */
 export function enforce(reply: string, s: ScreenOutcome) {

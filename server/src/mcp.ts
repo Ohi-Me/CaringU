@@ -136,7 +136,35 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
     title: "List family alerts", readOnly: true,
     description: "Open (unacknowledged) caregiver alerts, most severe first.",
     input: { include_acknowledged: z.boolean().optional() },
-  }, (a) => care.listAlerts(db, !!a.include_acknowledged));
+  }, (a, now) => care.listAlerts(db, !!a.include_acknowledged, now));
+
+  tool("respond_to_alert", {
+    title: "Caregiver responds to an alert",
+    description: "A caregiver takes responsibility for an alert ('calling_now', 'on_my_way', 'will_call_soon' or 'handled'), optionally with a short message. Stops the escalation ladder and the older adult's device speaks the response to her. Fails with ALREADY_CLAIMED if someone else is handling it.",
+    input: {
+      alert_id: z.string().min(3).max(40), responder: z.string().min(1).max(60),
+      action: z.enum(["calling_now", "on_my_way", "will_call_soon", "handled"]),
+      message: z.string().min(1).max(200).optional(),
+    },
+  }, (a, now) => care.respondToAlert(db, now, a.alert_id, a.responder, a.action, a.message));
+
+  tool("send_message_to_elder", {
+    title: "Send a spoken message to her device",
+    description: "A caregiver sends a short message that her CareCircle device reads aloud (e.g. 'I'll visit at 6').",
+    input: { from: z.string().min(1).max(60), text: z.string().min(1).max(300) },
+  }, (a, now) => care.sendMessageToElder(db, now, a.from, a.text));
+
+  tool("get_announcements", {
+    title: "Announcements waiting for her device", readOnly: true,
+    description: "Messages the older adult's device has not spoken yet (caregiver replies, escalation notices). Also advances the escalation ladder.",
+    input: {},
+  }, (_a, now) => care.getAnnouncements(db, now));
+
+  tool("mark_announcements_heard", {
+    title: "Mark announcements as spoken",
+    description: "The device calls this after reading messages aloud.",
+    input: { message_ids: z.array(z.string().min(3).max(40)).min(1).max(20) },
+  }, (a, now) => care.markAnnouncementsHeard(db, now, a.message_ids));
 
   tool("acknowledge_alert", {
     title: "Acknowledge alert",
