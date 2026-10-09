@@ -8,7 +8,8 @@
     "start": "node --env-file-if-exists=../.env --import tsx src/index.ts",
     "build": "tsc",
     "test": "node --import tsx --test test/*.test.ts",
-    "eval": "node --env-file-if-exists=../.env --import tsx scripts/eval.ts"
+    "eval": "node --env-file-if-exists=../.env --import tsx scripts/eval.ts",
+    "heldout": "node --env-file-if-exists=../.env --import tsx scripts/heldout.ts"
   },
   "keywords": [],
   "author": "",
