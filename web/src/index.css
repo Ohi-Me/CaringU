@@ -35,6 +35,7 @@ h2 { font-size: 1rem; margin: 0 0 .6rem; }
 .pill { font-size: .78rem; padding: .3rem .6rem; border-radius: 999px; border: 1px solid var(--line); }
 .pill-good { background: var(--good-bg); color: var(--good); border-color: transparent; font-weight: 600; }
 .pill-muted { color: var(--muted); }
+.pill-warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; font-weight: 600; }
 
 .grid { display: grid; grid-template-columns: minmax(340px, 440px) 1fr; gap: 16px; align-items: start; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }

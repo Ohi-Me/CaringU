@@ -7,7 +7,7 @@ const NO = /^(no|nope|don'?t|cancel|stop|not now|nahi)\b/i;
 
 const err = (r: any) => r?.error?.message ?? "something went wrong";
 
-export async function ruleAgent(history: Turn[], speaker: string, call: CallTool): Promise<string> {
+export async function ruleAgent(history: Turn[], speaker: string, call: CallTool, now: Date): Promise<string> {
   const text = history[history.length - 1].text.trim();
   const lower = text.toLowerCase();
   const prevAssistant = [...history].reverse().find((t) => t.role === "assistant")?.text ?? "";
@@ -48,21 +48,8 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     return "Thank you for telling me. I've noted how you're feeling.";
   }
 
-  // 4) "I took my X" → record dose (double-dose guarded).
-  if (/\b(i (just )?took|i'?ve taken|i have taken|taken my|had my)\b/i.test(lower)) {
-    const med = medRef(lower);
-    if (!med) return "Which medicine did you take?";
-    const r = await call("record_dose", { medication: med, recorded_by: speaker });
-    if (!r.ok) {
-      if (r.error.code === "DOUBLE_DOSE_RISK") return `Please don't take another one. You already took ${r.error.details.medication.name} at ${time(r.error.details.last_taken)}. I didn't record a second dose, and I've let your family know.`;
-      if (r.error.code === "AMBIGUOUS_MEDICATION") return `Which one: ${r.error.details.candidates.map((c: any) => c.name).join(" or ")}?`;
-      return `I couldn't record that: ${err(r)}`;
-    }
-    return `Got it, ${r.data.medication} recorded at ${time(r.data.taken_at)}.${r.data.refill_warning ? ` Heads up: ${r.data.refill_warning.split(": ")[1]} Shall I ask the pharmacy for a refill?` : ""}`;
-  }
-
-  // 5) "Did I take my X?"
-  if (/(did i|have i) (already )?(take|taken|had)|should i take|can i take/i.test(lower)) {
+  // 4) "Did I take my X?" (checked before "I took" so "have I taken" isn't a report).
+  if (/(did i|have i|had i) (already |even )?(take|taken|had)|should i take|can i take|is it (ok|okay|safe) to take/i.test(lower)) {
     const med = medRef(lower);
     if (!med) {
       const ov = await call("get_care_overview", {});
@@ -72,10 +59,23 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
       return `Today you've taken ${list(taken) || "nothing yet"}.${pend.length ? ` Still due: ${list(pend)}.` : ""}`;
     }
     const r = await call("check_dose_status", { medication: med });
-    if (!r.ok) return r.error.code === "AMBIGUOUS_MEDICATION" ? `Which one: ${r.error.details.candidates.map((c: any) => c.name).join(" or ")}?` : `I couldn't check: ${err(r)}`;
+    if (!r.ok) return medError(r, med) ?? `I couldn't check: ${err(r)}`;
     const d = r.data;
+    const today = ymd(now);
     if (!d.safe_to_take_now) return `Yes, you took your ${d.medication.name} at ${time(d.last_taken)}. Don't take another; the next one is at ${time(d.next_scheduled)}.`;
-    return `${d.last_taken ? `Your last ${d.medication.name} was ${d.last_taken.startsWith(today()) ? "at" : "on"} ${d.last_taken.startsWith(today()) ? time(d.last_taken) : d.last_taken}.` : `No ${d.medication.name} recorded yet.`} It's okay to take it now${d.medication.with_food ? ", with food" : ""}. Tell me when you have.`;
+    return `${d.last_taken ? `Your last ${d.medication.name} was ${d.last_taken.startsWith(today) ? `at ${time(d.last_taken)}` : `on ${d.last_taken}`}.` : `No ${d.medication.name} recorded yet.`} It's okay to take it now${d.medication.with_food ? ", with food" : ""}. Tell me when you have.`;
+  }
+
+  // 5) "I took my X" → record dose (double-dose guarded).
+  if (/\b(i (just |already )?took|i'?ve (just )?taken|i have (just )?taken|i (just )?had my)\b/i.test(lower)) {
+    const med = medRef(lower);
+    if (!med) return "Which medicine did you take?";
+    const r = await call("record_dose", { medication: med, recorded_by: speaker });
+    if (!r.ok) {
+      if (r.error.code === "DOUBLE_DOSE_RISK") return `Please don't take another one. You already took ${r.error.details.medication.name} at ${time(r.error.details.last_taken)}. I didn't record a second dose, and I've let your family know.`;
+      return medError(r, med) ?? `I couldn't record that: ${err(r)}`;
+    }
+    return `Got it, ${r.data.medication} recorded at ${time(r.data.taken_at)}.${r.data.refill_warning ? ` Heads up: ${r.data.refill_warning.split(": ")[1]} Shall I ask the pharmacy for a refill?` : ""}`;
   }
 
   // 6) Refills.
@@ -129,10 +129,21 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
   ].filter(Boolean).join(" ") || "Everything is on track today.";
 }
 
+const GENERIC = new Set(["medicine", "medicines", "meds", "med", "pill", "pills", "tablet", "tablets", "dose", "doses", "medication", "medications", "morning", "evening", "night"]);
+
+// A known medicine word, or the unknown word after "my" (so "aspirin" reaches the
+// server and comes back as MEDICATION_NOT_FOUND instead of being silently ignored).
 function medRef(lower: string): string | null {
-  const m = /(levothyroxine|thyroid|metformin|sugar|diabet\w*|amlodipine|bp|blood ?pressure|pressure|atorvastatin|cholesterol|statin)/.exec(lower);
-  return m ? m[1] : null;
+  const m = /\b(levothyroxine|thyroid|metformin|sugar|diabet\w*|amlodipine|bp|blood ?pressure|pressure|atorvastatin|cholesterol|statin)\b/.exec(lower);
+  if (m) return m[1];
+  const u = /\b(?:took|taken|take|had) (?:my|the|a|an|one|another) ([a-z][a-z-]{2,})/.exec(lower);
+  return u && !GENERIC.has(u[1]) ? u[1] : null;
+}
+function medError(r: any, med: string) {
+  if (r.error.code === "AMBIGUOUS_MEDICATION") return `Which one: ${r.error.details.candidates.map((c: any) => c.name).join(" or ")}?`;
+  if (r.error.code === "MEDICATION_NOT_FOUND") return `I don't see ${med} in your medicine list, which has ${list(r.error.details.known)}. Please check with your family or doctor before taking anything new.`;
+  return null;
 }
 const time = (stamp: string) => stamp?.split(" ")[1] ?? stamp;
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const list = (xs: string[]) => xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;

@@ -25,10 +25,15 @@ export default function App() {
   const [mobilePane, setMobilePane] = useState<"echo" | "side">("echo");
   const [mode, setMode] = useState<{ mode: string; model: string | null } | null>(null);
   const [tick, setTick] = useState(0);
+  const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
   const recRef = useRef<any>(null);
 
   useEffect(() => onTrace((e) => setEvents((xs) => [e, ...xs].slice(0, 200))), []);
   useEffect(() => { fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null)); }, []);
+  useEffect(() => {
+    const load = () => fetch("/api/clock").then((r) => r.json()).then(setClock).catch(() => {});
+    load(); const t = setInterval(load, 30000); return () => clearInterval(t);
+  }, [tick]);
 
   const speak = useCallback((text: string) => {
     if (!voiceOn || !("speechSynthesis" in window)) { setOrb("idle"); return; }
@@ -98,9 +103,10 @@ export default function App() {
     rec.start();
   };
 
-  const reset = async () => {
-    if (!confirm("Reset all sample data to the demo starting point?")) return;
-    await fetch("/api/reset", { method: "POST" });
+  const reset = async (time?: string) => {
+    if (!confirm(time ? `Reset all sample data and start the demo day at ${time}?` : "Reset all sample data using the real current time?")) return;
+    speechSynthesis?.cancel();
+    await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(time ? { time } : {}) });
     setTurns([]); setEvents([]); setTick((x) => x + 1);
   };
 
@@ -123,7 +129,9 @@ export default function App() {
             {mode ? (mode.mode === "bedrock" ? "Amazon Bedrock agent" : "Rule-based agent") : "Agent offline"}
           </span>
           <span className="pill pill-muted">MCP 2025-11-25 · Streamable HTTP</span>
-          <button className="ghost" onClick={reset}>Reset demo</button>
+          {clock && <span className={`pill ${clock.simulated ? "pill-warn" : "pill-muted"}`} title={clock.now}>{clock.simulated ? "Demo time " : "Time "}{new Date(clock.now).toTimeString().slice(0, 5)}</span>}
+          <button className="ghost" onClick={() => reset("10:00")} title="Reset sample data and start at 10:00">Reset demo (10:00)</button>
+          <button className="ghost" onClick={() => reset()} title="Reset sample data using the real time">Reset (now)</button>
         </div>
       </header>
 

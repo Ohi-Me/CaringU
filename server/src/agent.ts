@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { BedrockRuntimeClient, ConverseCommand, type Message, type Tool } from "@aws-sdk/client-bedrock-runtime";
 import { ruleAgent } from "./ruleAgent.js";
+import type { Clock } from "./care.js";
 
 export type Emit = (e: Record<string, unknown>) => void;
 export type Turn = { role: "user" | "assistant"; text: string };
@@ -61,7 +62,7 @@ export function bedrockConfigured() {
     || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || process.env.AGENT_MODE === "bedrock");
 }
 
-async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit) {
+async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date) {
   const br = new BedrockRuntimeClient({ region: REGION });
   const toolConfig = {
     tools: tools.map((t) => ({ toolSpec: { name: t.name, description: t.description, inputSchema: { json: t.inputSchema } } })) as Tool[],
@@ -71,7 +72,7 @@ async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call
   for (let step = 0; step < MAX_STEPS; step++) {
     const t0 = performance.now();
     const out = await br.send(new ConverseCommand({
-      modelId: MODEL_ID, system: [{ text: systemPrompt(new Date(), speaker) }], messages, toolConfig,
+      modelId: MODEL_ID, system: [{ text: systemPrompt(now, speaker) }], messages, toolConfig,
       inferenceConfig: { maxTokens: 700, temperature: 0.2 },
     }));
     emit({ type: "model", provider: "bedrock", model: MODEL_ID, step, ms: Math.round(performance.now() - t0), usage: out.usage, stop: out.stopReason });
@@ -91,7 +92,7 @@ async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call
   return "Sorry, that took too many steps. Please try a simpler request.";
 }
 
-export function agentRouter(mcpUrl: string) {
+export function agentRouter(mcpUrl: string, clock: Clock) {
   const r = Router();
   r.get("/mode", (_req, res) => res.json({ mode: bedrockConfigured() ? "bedrock" : "rules", model: bedrockConfigured() ? MODEL_ID : null }));
   r.post("/chat", async (req, res) => {
@@ -106,14 +107,14 @@ export function agentRouter(mcpUrl: string) {
       mcp = await connectMcp(mcpUrl, emit);
       let text: string, mode = bedrockConfigured() ? "bedrock" : "rules";
       if (mode === "bedrock") {
-        try { text = await bedrockAgent(history, speaker, mcp.tools, mcp.call, emit); }
+        try { text = await bedrockAgent(history, speaker, mcp.tools, mcp.call, emit, clock()); }
         catch (e: any) {
           // Honest degradation: say the model failed, then use the deterministic planner.
           emit({ type: "warning", message: `Bedrock unavailable (${e?.name ?? "error"}: ${String(e?.message ?? e).slice(0, 160)}). Falling back to rule-based planner.` });
           mode = "rules";
-          text = await ruleAgent(history, speaker, mcp.call);
+          text = await ruleAgent(history, speaker, mcp.call, clock());
         }
-      } else text = await ruleAgent(history, speaker, mcp.call);
+      } else text = await ruleAgent(history, speaker, mcp.call, clock());
       emit({ type: "final", text, mode, total_ms: Math.round(performance.now() - t0) });
     } catch (e: any) {
       emit({ type: "error", message: `Could not reach the CareCircle MCP server: ${e?.message ?? e}` });
