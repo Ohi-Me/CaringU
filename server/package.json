@@ -1,29 +1,29 @@
 {
-  "name": "server",
+  "name": "carecircle-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "CareCircle MCP server and agent",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "dev": "node --env-file-if-exists=../.env --import tsx --watch src/index.ts",
+    "start": "node --env-file-if-exists=../.env --import tsx src/index.ts",
     "build": "tsc",
     "test": "node --import tsx --test test/*.test.ts",
-    "eval": "tsx scripts/eval.ts"
+    "eval": "node --env-file-if-exists=../.env --import tsx scripts/eval.ts"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1148.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "express": "^5.2.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
 }

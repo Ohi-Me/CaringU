@@ -7,6 +7,9 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { BedrockRuntimeClient, ConverseCommand, type Message, type Tool } from "@aws-sdk/client-bedrock-runtime";
 import { ruleAgent } from "./ruleAgent.js";
 import type { Clock } from "./care.js";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export type Emit = (e: Record<string, unknown>) => void;
 export type Turn = { role: "user" | "assistant"; text: string };
@@ -59,7 +62,8 @@ async function connectMcp(url: string, emit: Emit) {
 export function bedrockConfigured() {
   if (process.env.AGENT_MODE === "rules") return false;
   return !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE || process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
-    || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || process.env.AGENT_MODE === "bedrock");
+    || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI || process.env.AGENT_MODE === "bedrock"
+    || existsSync(join(homedir(), ".aws", "credentials")));
 }
 
 async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date) {
