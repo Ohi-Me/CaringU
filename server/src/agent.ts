@@ -16,7 +16,7 @@ export type Emit = (e: Record<string, unknown>) => void;
 export type Turn = { role: "user" | "assistant"; text: string };
 export type CallTool = (name: string, args: Record<string, unknown>) => Promise<any>;
 
-const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? "us.amazon.nova-pro-v1:0";
+const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? "amazon.nova-pro-v1:0";
 const REGION = process.env.AWS_REGION ?? "us-east-1";
 const MAX_STEPS = 8;
 
@@ -64,7 +64,7 @@ export function bedrockConfigured() {
   if (process.env.AGENT_MODE === "rules") return false;
   return !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE || process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
     || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI || process.env.AGENT_MODE === "bedrock"
-    || existsSync(join(homedir(), ".aws", "credentials")));
+    || existsSync(join(homedir(), ".aws", "credentials")) || existsSync(join(homedir(), ".aws", "config")));
 }
 
 async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date, screen: ScreenOutcome) {

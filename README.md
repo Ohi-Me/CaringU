@@ -90,7 +90,7 @@ Front-end development with hot reload: run `npm start` in `server/`, then `npm r
 
 ### Use Amazon Bedrock
 
-1. In the AWS console, enable model access for the model you want (default `us.amazon.nova-pro-v1:0`, region `us-east-1`).
+1. In the AWS console, enable model access for the model you want (default `amazon.nova-pro-v1:0`, region `us-east-1`).
 2. Make credentials available the standard way (`aws configure`, `AWS_PROFILE`, or an IAM role when deployed). Never commit keys.
 3. Optionally copy `.env.example` to `.env` and set `AGENT_MODE=bedrock` or `BEDROCK_MODEL_ID`.
 
