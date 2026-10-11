@@ -33,6 +33,8 @@ export default function App() {
   // A question the MCP server is asking the person on this device (elicitation), relayed by the agent.
   const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
   const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
+  const [stripImage, setStripImage] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   deviceAskRef.current = deviceAsk;
   const recRef = useRef<any>(null);
   const orbRef = useRef<Orb>("idle");
@@ -85,7 +87,7 @@ export default function App() {
     setTick((x) => x + 1);
   };
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, photoId?: string) => {
     text = text.trim();
     if (!text || orb === "thinking") return;
     const history = [...turns, { role: "user" as const, text }];
@@ -96,7 +98,7 @@ export default function App() {
     let final = "";
     let by: AnsweredBy | undefined;
     try {
-      const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker, elicitation: true }) });
+      const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker, elicitation: true, ...(photoId ? { photo_id: photoId } : {}) }) });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -111,7 +113,10 @@ export default function App() {
           if (!line.trim()) continue;
           const e = JSON.parse(line);
           if (e.type === "mcp") trace({ source: "agent", kind: "mcp", label: e.method === "initialize" ? `initialize → protocol ${e.protocolVersion}` : `tools/list → ${e.count} tools`, ok: true, ms: e.ms });
-          else if (e.type === "tool_result") trace({ source: "agent", kind: "tools/call", label: e.name, ok: e.ok, ms: e.ms, detail: e.result });
+          else if (e.type === "tool_result") {
+            trace({ source: "agent", kind: "tools/call", label: e.name, ok: e.ok, ms: e.ms, detail: e.result });
+            if (e.name === "inspect_medicine_strip") setStripImage(e.result?.data?.evidence?.annotated_image ? `${e.result.data.evidence.annotated_image}?t=${Date.now()}` : null);
+          }
           else if (e.type === "model") trace({ source: "agent", kind: "model", label: `Bedrock ${e.model} step ${e.step + 1} (${e.stop})`, ok: true, ms: e.ms, detail: e.usage });
           else if (e.type === "warning") trace({ source: "agent", kind: "warning", label: e.message, ok: false });
           else if (e.type === "safety") trace({ source: "agent", kind: "safety", label: `Safety screen: health ${e.triage}${e.triage_signals.length ? ` (${e.triage_signals.join(", ")})` : ""} · scam ${e.scam}${e.scam_score !== null ? ` (${e.scam_score}/100)` : ""}`, detail: e });
@@ -181,6 +186,20 @@ export default function App() {
   };
 
   const last = [...turns].reverse();
+  // "Show a strip": camera photo -> resized in the browser -> uploaded -> sent with the message.
+  const showStrip = async (file: File) => {
+    try {
+      setStripImage(null);
+      const blob = await downscale(file, 1600);
+      const up = await fetch("/api/vision/photo", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob }).then((r) => r.json());
+      if (!up.ok) throw new Error(up.error);
+      trace({ source: "dashboard", kind: "photo", label: `Strip photo uploaded (${Math.round(blob.size / 1024)} KB)`, ok: true });
+      send("I'm showing you my medicine strip.", up.photo_id);
+    } catch (e: any) {
+      trace({ source: "dashboard", kind: "photo", label: `Photo upload failed: ${e?.message ?? e}`, ok: false });
+    }
+  };
+
   const lastAssistant = last.find((t) => t.role === "assistant");
   const lastUser = last.find((t) => t.role === "user");
 
@@ -246,6 +265,11 @@ export default function App() {
               : <p className="reply muted">Hi Asha. Ask me about your medicines, appointments, or anything that worries you.</p>}
           </div>
 
+          {stripImage && <figure className="strip-result"><img src={stripImage} alt="Strip check: green circles are pills found, red are empty cavities" /><figcaption>OpenCV strip check: green = pill, red = empty</figcaption></figure>}
+          <div className="camera-row">
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) showStrip(f); e.target.value = ""; }} />
+            <button className="ghost" onClick={() => fileRef.current?.click()} disabled={orb === "thinking"}>📷 Show a medicine strip</button>
+          </div>
           <form className="ask" onSubmit={(e) => { e.preventDefault(); send(input); }}>
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Or type here…" aria-label="Message" />
             <button type="submit" disabled={!input.trim() || orb === "thinking"}>Send</button>
@@ -382,6 +406,8 @@ function Family({ tick }: { tick: number }) {
         <Stat label="Open alerts" value={d.open_alerts.length} tone={d.open_alerts.some((a: any) => a.severity === "urgent") ? "urgent" : undefined} />
       </div>
 
+      <StripCard busyKey={busy} setBusyKey={setBusy} />
+
       {ov.pending_confirmations.length > 0 && (
         <div className="card">
           <h2>Waiting for a yes</h2>
@@ -451,6 +477,74 @@ function Family({ tick }: { tick: number }) {
           {d.wellbeing.map((w: any, i: number) => <p key={i} className={w.red_flag ? "urgent-text" : ""}>{w.at.split(" ")[1]} — “{w.symptoms}”{w.mood ? ` (${w.mood})` : ""}</p>)}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Phone photos are large; shrink before upload (keeps the strip check fast). */
+async function downscale(file: File, maxSide: number): Promise<Blob> {
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+  return await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", 0.88));
+}
+
+function StripCard({ busyKey, setBusyKey }: { busyKey: string | null; setBusyKey: (k: string | null) => void }) {
+  const [checks, setChecks] = useState<any[]>([]);
+  const [meds, setMeds] = useState<any[]>([]);
+  const [med, setMed] = useState("");
+  const [total, setTotal] = useState(10);
+  const [inStrip, setInStrip] = useState(10);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string; preview?: string } | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const load = useCallback(async () => {
+    const [c, m] = await Promise.all([callTool("list_strip_checks", { limit: 4 }, true), callTool("list_medications", {}, true)]);
+    if (c.ok) setChecks(c.data as any[]);
+    if (m.ok) { setMeds(m.data as any[]); setMed((x) => x || (m.data as any[])[0]?.id || ""); }
+  }, []);
+  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, [load]);
+  const register = async (f: File) => {
+    setBusyKey("register"); setMsg(null);
+    try {
+      const blob = await downscale(f, 1600);
+      const up = await fetch("/api/vision/photo", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob }).then((r) => r.json());
+      if (!up.ok) throw new Error(up.error);
+      const r = await callTool("register_medicine_strip", { photo_id: up.photo_id, medication: med, total_cavities: total, pills_in_strip: inStrip });
+      if (!r.ok) throw new Error(r.error.message);
+      const d: any = r.data;
+      setMsg({ ok: true, text: `Registered ${d.registered}: ${d.cavities} cavities found.${d.warning ? " " + d.warning : ""}`, preview: `${d.preview}?t=${Date.now()}` });
+      load();
+    } catch (e: any) { setMsg({ ok: false, text: e?.message ?? String(e) }); }
+    setBusyKey(null);
+  };
+  return (
+    <div className="card">
+      <h2>Strip checks (camera)</h2>
+      {checks.length === 0 ? <p className="muted small">No strip checks yet. Register a strip below, then use "Show a medicine strip" on her device.</p> : (
+        <div className="strips">
+          {checks.map((c, i) => (
+            <figure key={i} className={`strip-thumb v-${c.verdict}`}>
+              <img src={c.image} alt={`${c.medication} strip, ${c.remaining} of ${c.total} left`} />
+              <figcaption><b>{c.medication}</b> {c.remaining}/{c.total} left · {String(c.verdict).replace(/_/g, " ")} · {c.at.split(" ")[1]}</figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+      <details className="register">
+        <summary>Register a strip (one reference photo per medicine)</summary>
+        <p className="muted small">Lay the strip flat, photograph from straight above in good light, bump side up.</p>
+        <div className="reg-row">
+          <label>Medicine <select value={med} onChange={(e) => setMed(e.target.value)}>{meds.map((m) => <option key={m.id} value={m.id}>{m.name} {m.dose}</option>)}</select></label>
+          <label>Cavities <input type="number" min={1} max={60} value={total} onChange={(e) => setTotal(+e.target.value)} /></label>
+          <label>Pills in it now <input type="number" min={0} max={60} value={inStrip} onChange={(e) => setInStrip(+e.target.value)} /></label>
+        </div>
+        <input ref={file} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) register(f); e.target.value = ""; }} />
+        <button disabled={busyKey === "register" || !med} onClick={() => file.current?.click()}>{busyKey === "register" ? "Registering…" : "Take reference photo"}</button>
+        {msg && <p className={msg.ok ? "claimed" : "warn-text"}>{msg.text}</p>}
+        {msg?.preview && <img className="reg-preview" src={msg.preview} alt="Detected cavities on the reference strip" />}
+      </details>
     </div>
   );
 }

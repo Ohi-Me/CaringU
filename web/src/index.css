@@ -140,3 +140,18 @@ h2 { font-size: 1rem; margin: 0 0 .6rem; }
 .device-label .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .sub b { color: var(--accent); }
 .answered { font-size: .8rem; margin: .4rem 0 0; }
+
+/* ---- strip check ---- */
+.camera-row { display: flex; gap: 8px; }
+.camera-row button { flex: 1; font-size: 1.05rem; }
+.strip-result { margin: 0; } .strip-result img, .reg-preview { width: 100%; border-radius: 12px; border: 1px solid var(--line); }
+.strip-result figcaption { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+.strips { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.strip-thumb { margin: 0; border-radius: 10px; overflow: hidden; border: 2px solid var(--line); }
+.strip-thumb img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; }
+.strip-thumb figcaption { font-size: .78rem; padding: 4px 6px; }
+.strip-thumb.v-possible_double_dose { border-color: var(--urgent); } .strip-thumb.v-unrecorded_dose { border-color: var(--warn); }
+.strip-thumb.v-consistent { border-color: var(--good); }
+.register { margin-top: 10px; font-size: .9rem; } .register summary { cursor: pointer; font-weight: 600; }
+.reg-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; } .reg-row input { width: 5rem; }
+.trace .k-photo .kind { color: var(--accent-2); }
