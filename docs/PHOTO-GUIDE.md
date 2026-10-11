@@ -8,7 +8,8 @@ Use **5–8 different strips**. Include a full one, some partly used ones, and o
 
 ### A. One *reference* photo per strip (the "registration" photo)
 - Strip **flat on a plain table**, photo taken from directly **above**, good daylight, whole strip visible, **bump side up** (the side where you see the pills).
-- Name: `ref_<medicine>.jpg`, for example `ref_paracetamol.jpg`.
+- Name: `ref_<medicine>_<left>of<total>.jpg`, for example `ref_paracetamol_6of10.jpg` (6 pills left out of 10 cavities).
+- Use one short name per strip with letters, numbers or `-` only (e.g. `paracetamol`, `vitd3`, `pan-40`), and the **same name** in its test photos.
 
 ### B. 6–8 *test* photos per strip, each one a little different
 Vary one or two things each time:
