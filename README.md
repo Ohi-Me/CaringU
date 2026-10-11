@@ -23,6 +23,32 @@ Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ trac
 | "I'm running low on my BP pills" | `request_refill`: the **MCP server asks her directly** ("Send a refill request for 30 × Amlodipine…?"), by voice or with Yes/No buttons. The refill runs only if she says yes. |
 | Ravi: "Any problems with mom today?" | `get_family_digest`: doses taken and missed, alerts, refills, appointments, and whether a ride is arranged. |
 
+### Strip check: the camera answers "did I take it?"
+
+CareCircle's records only know doses someone reported. The **strip check** adds evidence:
+1. Asha holds a medicine **blister strip** up to the camera ("📷 Show a medicine strip").
+2. An **OpenCV 5** service identifies which registered medicine it is, or **refuses if unsure**. It never guesses.
+3. It counts full and empty cavities and returns an annotated photo.
+4. CareCircle **reconciles the count with the dose log** since the previous check:
+
+| What the strip shows | What happens |
+|---|---|
+| Same number gone as doses recorded | "That matches what I have recorded." |
+| **One more gone** than recorded | The MCP server asks her (elicitation): *"Record it as taken now?"* It records the dose only on yes. |
+| **Two or more more gone**, or one more while a dose is already recorded within the minimum gap | **Possible double dose:** an urgent family alert, decided by deterministic rules, and she's told to call her pharmacist (or 112 if unwell). |
+| Fewer gone than recorded | Noted (perhaps another strip was used). |
+
+Caregivers register each medicine once from the dashboard with a top-down reference photo. Details: [`vision/`](vision) and [docs/vision-eval.md](docs/vision-eval.md).
+
+**OpenCV 5 pipeline** ([`strip.py`](vision/carecircle_vision/strip.py)):
+
+| Step | OpenCV operations |
+|---|---|
+| Identify the strip | CLAHE, then SIFT, then FLANN kNN with Lowe's ratio test, then `findHomography` (USAC_MAGSAC). Geometry is checked for convexity and area, and close calls go to printed-foil normalised cross-correlation. |
+| Straighten it | `warpPerspective` into the reference's canonical frame |
+| Find cavities (at registration) | Canny, morphology and `minAreaRect` for the outline, then `HoughCircles`, clustered with `kmeans` into an evenly spaced rows × cols grid |
+| Full or empty | Per-cavity CIE Lab distance to the learned pill colour and to the *local* foil ring (handles uneven light), plus a Laplacian texture cue for torn foil |
+
 The family dashboard (right side, or the *Family* tab on a phone) is a second MCP client running in the browser. It shows live alerts with the escalation chain and timeline, response buttons, today's medicine timeline, approvals, refills, appointments and messages sent to her device.
 
 ## What makes it trustworthy
@@ -40,7 +66,8 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 
 | | Status |
 |---|---|
-| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 20 tools. |
+| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 23 tools. |
+| Vision | **Real.** OpenCV 5.0.0 service (Python, FastAPI), called by the MCP server. Unit and end-to-end tests use synthetic strips; real-photo accuracy is in [docs/vision-eval.md](docs/vision-eval.md). |
 | MCP clients | **Real.** (1) The agent (server side) runs `initialize`, `tools/list` and `tools/call`, and handles elicitation by relaying questions to the device. (2) The family dashboard is an MCP client in the browser with its own elicitation handler. |
 | State | **Real.** SQLite (Node's built-in `node:sqlite`). Changes persist and are verified by re-reading. |
 | Agent | **Amazon Bedrock** Converse API with tool use (default `amazon.nova-pro-v1:0`), or a transparent rule-based planner when no AWS credentials are configured |
@@ -58,14 +85,15 @@ flowchart LR
     D["Family dashboard<br/>MCP client + elicitation handler"] <-->|Streamable HTTP session| M
   end
   subgraph Server ["Node.js server"]
-    A["Orchestrator<br/>1 safety screen<br/>2 Bedrock (Nova Pro) or rule planner<br/>3 confirmation guard"] <-->|MCP client · Streamable HTTP session| M["MCP server /mcp<br/>20 zod-validated tools<br/>elicitation for approvals"]
+    A["Orchestrator<br/>1 safety screen<br/>2 Bedrock (Nova Pro) or rule planner<br/>3 confirmation guard"] <-->|MCP client · Streamable HTTP session| M["MCP server /mcp<br/>23 zod-validated tools<br/>elicitation for approvals"]
     M --> C["care.ts · safety.ts · family.ts<br/>deterministic rules"]
+    M -->|HTTP| CV["OpenCV 5 vision service<br/>identify · warp · count cavities"]
     C --> DB[(SQLite)]
     A -.->|Converse API| B[(Amazon Bedrock)]
   end
 ```
 
-### MCP tools (20)
+### MCP tools (23)
 
 | Area | Tools |
 |---|---|
@@ -73,9 +101,11 @@ flowchart LR
 | Appointments | `list_appointments`, `schedule_appointment`†, `cancel_appointment`† |
 | Approvals | `confirm_action` (fallback for clients without elicitation) |
 | Safety | `log_wellbeing`, `assess_scam_risk` |
+| Strip check (camera) | `inspect_medicine_strip`‡, `register_medicine_strip`, `list_strip_checks` |
 | Family loop | `notify_family`, `list_alerts`, `acknowledge_alert`, `respond_to_alert`, `send_message_to_elder`, `get_announcements`, `mark_announcements_heard`, `get_family_digest` |
 
 † Approved by a human through MCP elicitation, or through `confirm_action` for clients that can't elicit.
+‡ Records an unlogged dose only after the person confirms it through elicitation.
 
 ## Run it locally
 
@@ -84,6 +114,13 @@ Requires **Node.js 22.13+** (built-in `node:sqlite`; developed on Node 24).
 ```bash
 cd web && npm install && npm run build && cd ..
 cd server && npm install && npm start
+```
+
+Strip check (optional, needs Python 3.11+), in a second terminal:
+
+```bash
+cd vision && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # macOS/Linux: .venv/bin/pip
+cd ../server && npm run vision     # OpenCV service on :8790
 ```
 
 Open http://localhost:8787.
@@ -112,9 +149,12 @@ Use the returned `Mcp-Session-Id` header on later requests. Declare `"capabiliti
 
 ```bash
 cd server
-npm test          # 29 tests: domain rules, safety screens, escalation ladder, raw JSON-RPC + sessions, SDK client, elicitation round-trips
+npm test          # 36 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
+                  #           Bedrock-fallback regressions, end-to-end strip check (Node -> OpenCV service)
 npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (server running)
 npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)
+cd ../vision && .venv/Scripts/python -m pytest      # 13 vision tests (synthetic strips)
+python scripts/eval_real.py data/raw --out ../docs/vision-eval.md   # real photos (see docs/PHOTO-GUIDE.md)
 ```
 
 | Held-out measure (rule-based agent) | Baseline | After safety rework |
