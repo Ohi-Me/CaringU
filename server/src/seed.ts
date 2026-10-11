@@ -8,7 +8,7 @@ const HOUR = 3_600_000;
 
 export function resetDemo(db: DB, now: Date) {
   tx(db, () => {
-    for (const t of ["dose_log", "refills", "pending_actions", "alert_events", "messages", "alerts", "wellbeing", "appointments", "medications", "people", "audit"])
+    for (const t of ["strip_checks", "dose_log", "refills", "pending_actions", "alert_events", "messages", "alerts", "wellbeing", "appointments", "medications", "people", "audit"])
       db.exec(`DELETE FROM ${t}`);
 
     const person = db.prepare("INSERT INTO people (id, name, role, relation, phone, priority) VALUES (?,?,?,?,?,?)");

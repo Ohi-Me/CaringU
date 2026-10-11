@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as care from "./care.js";
 import type { DB } from "./db.js";
+import * as vision from "./vision.js";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Local date YYYY-MM-DD; omit for today");
 const actor = z.string().min(1).max(60).optional().describe("Who is speaking, e.g. 'Asha (voice)' or 'Ravi (son)'");
@@ -232,6 +233,44 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
     description: "Daily summary for caregivers: adherence, missed doses, wellbeing entries, alerts, upcoming appointments and refills needed.",
     input: { date: date.optional() },
   }, (a, now) => care.familyDigest(db, now, a.date));
+
+  // ---------------- strip check (OpenCV 5 vision service) ----------------
+  const photoId = z.string().regex(/^ph_[a-f0-9]{12}$/).describe("Id returned by the photo upload");
+
+  tool("inspect_medicine_strip", {
+    title: "Strip check (camera)",
+    description: "Looks at a photo of a medicine blister strip with OpenCV: identifies WHICH registered medicine it is (or refuses if unsure), counts full vs empty cavities, and reconciles with the dose log since the last check. Verdicts: baseline, consistent, unrecorded_dose (asks the person before recording), possible_double_dose (URGENT family alert), fewer_gone_than_recorded. Returns an annotated image.",
+    input: { photo_id: photoId },
+  }, async (a, now, ctx) => {
+    const r: any = await vision.inspectStrip(db, now, a.photo_id);
+    if (r.suggest_record_dose) {
+      // Vision evidence -> human approval -> state change, all inside this tool call.
+      const c = await ctx.confirm(`The strip shows one more ${r.medication} gone than recorded. Record it as taken now?`);
+      if (c.asked && c.outcome === "approved") {
+        const rec: any = care.recordDose(db, r.medication_id, c.by ?? "Asha (via strip check)", clock(), { note: `strip check ${r.check_id}` });
+        return { ...r, suggest_record_dose: false, recorded: rec, confirmed_via: "mcp_elicitation" };
+      }
+      if (c.asked) return { ...r, suggest_record_dose: false, recorded: null, confirmed_via: "mcp_elicitation", answer: c.outcome };
+    }
+    return r;
+  });
+
+  tool("register_medicine_strip", {
+    title: "Register a medicine strip (caregiver)",
+    description: "Caregiver registers a reference photo of a medicine's blister strip (flat, top-down, printed side visible) so later strip checks can recognise it. Needs the number of cavities in a full strip.",
+    input: {
+      photo_id: photoId, medication: z.string().min(1).max(80),
+      total_cavities: z.number().int().min(1).max(60),
+      pills_in_strip: z.number().int().min(0).max(60).optional().describe("How many pills are in the strip in this photo"),
+      rows: z.number().int().min(1).max(6).optional(),
+    },
+  }, (a) => vision.registerStrip(db, a.photo_id, a.medication, a.total_cavities, a.pills_in_strip, a.rows));
+
+  tool("list_strip_checks", {
+    title: "Recent strip checks", readOnly: true,
+    description: "The latest strip checks with their verdicts and annotated images.",
+    input: { limit: z.number().int().min(1).max(20).optional() },
+  }, (a) => vision.recentStripChecks(db, a.limit ?? 6));
 
   return server;
 }

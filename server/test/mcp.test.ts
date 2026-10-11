@@ -57,10 +57,10 @@ test("raw JSON-RPC: initialize negotiates 2025-11-25 and opens a session", async
   assert.equal((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" }, { "Mcp-Session-Id": session })).status, 202);
 });
 
-test("raw JSON-RPC: tools/list exposes 20 tools with schemas and annotations", async () => {
+test("raw JSON-RPC: tools/list exposes 23 tools with schemas and annotations", async () => {
   const j = await rpcResult(await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { "Mcp-Session-Id": session }));
   const tools = j.result.tools;
-  assert.equal(tools.length, 20);
+  assert.equal(tools.length, 23);
   for (const t of tools) { assert.ok(t.description.length > 20, t.name); assert.equal(t.inputSchema.type, "object"); }
   assert.equal(tools.find((t: any) => t.name === "list_medications").annotations.readOnlyHint, true);
   assert.equal(tools.find((t: any) => t.name === "cancel_appointment").annotations.destructiveHint, true);

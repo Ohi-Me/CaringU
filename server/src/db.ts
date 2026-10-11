@@ -66,6 +66,10 @@ export function openDb(path: string): DB {
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY, at TEXT NOT NULL, from_name TEXT NOT NULL, to_elder INTEGER NOT NULL DEFAULT 1,
       text TEXT NOT NULL, alert_id TEXT, heard_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS strip_checks (
+      id TEXT PRIMARY KEY, at TEXT NOT NULL, medication_id TEXT NOT NULL, ref_id TEXT NOT NULL,
+      remaining INTEGER NOT NULL, total INTEGER NOT NULL, photo_id TEXT NOT NULL, verdict TEXT NOT NULL
     );`);
   return db;
 }

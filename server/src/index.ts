@@ -10,6 +10,7 @@ import { resetDemo } from "./seed.js";
 import { activityLog, type Clock } from "./care.js";
 import { agentRouter } from "./agent.js";
 import { runEscalations, syncKnownPeople } from "./family.js";
+import { photoPath, savePhoto, visionHealth } from "./vision.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
@@ -71,7 +72,22 @@ setInterval(() => {
 }, 60_000).unref();
 
 // ---- demo/meta endpoints (not part of the MCP surface) ----
-app.get("/api/health", (_req, res) => res.json({ ok: true, mcp: "/mcp", protocol: "2025-11-25", transport: "streamable-http", sessions: sessions.size }));
+app.get("/api/health", async (_req, res) => res.json({ ok: true, mcp: "/mcp", protocol: "2025-11-25", transport: "streamable-http", sessions: sessions.size, vision: await visionHealth() }));
+
+// ---- strip-check photos: upload raw JPEG/PNG bytes, get an id the MCP tools accept ----
+app.post("/api/vision/photo", express.raw({ type: ["image/jpeg", "image/png"], limit: "12mb" }), (req, res) => {
+  try {
+    if (!Buffer.isBuffer(req.body)) return res.status(415).json({ ok: false, error: "Send image/jpeg or image/png bytes" });
+    res.json({ ok: true, photo_id: savePhoto(req.body) });
+  } catch (e: any) {
+    res.status(400).json({ ok: false, error: e?.message ?? "bad photo" });
+  }
+});
+app.get("/api/vision/photo/:id/annotated", (req, res) => {
+  const p = photoPath(req.params.id, true);
+  if (!p) return res.status(404).end();
+  res.set("Cache-Control", "no-store").type("jpeg").sendFile(p);
+});
 app.get("/api/activity", (_req, res) => res.json(activityLog(db, 40)));
 app.get("/api/clock", (_req, res) => res.json({ now: clock().toString(), simulated: offsetMs !== 0 }));
 // Demo control: move the demo clock forward (e.g. to show the escalation ladder on camera).

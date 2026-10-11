@@ -15,6 +15,8 @@ export interface ScreenOutcome {
   terminalReply: string | null;
   /** Facts the agent must know about (already-executed tool calls). */
   notes: string[];
+  /** A strip photo attached to this message, if any. */
+  photoId?: string;
 }
 
 export async function runScreen(text: string, speaker: string, call: CallTool, emit: Emit): Promise<ScreenOutcome> {

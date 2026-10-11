@@ -18,6 +18,29 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
   const prev = [...history].slice(0, -1).reverse().find((t) => t.role === "assistant")?.text ?? "";
   const isCaregiver = !/^asha/i.test(speaker);
 
+  // ---- strip photo attached: let the camera evidence drive the reply ----
+  if (screen.photoId) {
+    const r = await call("inspect_medicine_strip", { photo_id: screen.photoId });
+    if (!r.ok) return r.error?.code === "VISION_UNAVAILABLE" ? "I can't look at photos right now, so I haven't changed anything. You can tell me instead which medicine you took." : `I couldn't check that photo: ${err(r)}`;
+    const d = r.data;
+    if (!d.recognised) return `I couldn't tell which medicine this is, so I won't guess. Please hold the strip flat, a little closer, in good light, with the printed side up.`;
+    const count = `I can see ${d.pills_remaining} of ${d.total_cavities} ${d.medication} left in this strip.`;
+    if (d.recorded) return `${count} You told me you took it, so I've recorded it at ${time(d.recorded.taken_at ?? "")}.`;
+    if (d.confirmed_via === "mcp_elicitation") return `${count} Okay, I haven't recorded anything.`;
+    switch (d.verdict) {
+      case "possible_double_dose":
+        return `${count} ${d.message} Please don't take any more ${d.medication.split(" ")[0]} today, and call your pharmacist or doctor. If you feel faint or unwell, call 112. I've told ${list(d.notified) || "your family"}.`;
+      case "unrecorded_dose":
+        return `${count} One more is gone than I had recorded. Did you take it? Say "I took my ${d.medication.split(" ")[0]}" and I'll note it.`;
+      case "consistent":
+        return `${count} That matches what I have recorded.`;
+      case "fewer_gone_than_recorded":
+        return `${count} ${d.message}`;
+      default:
+        return `${count} I'll use this to keep track from now on.`;
+    }
+  }
+
   // ---- 0. The screen flagged a call/message as suspicious (not certain): advise caution ----
   if (screen.scamChecked && screen.scam?.verdict === "suspicious")
     return `Be careful, that sounds suspicious. Warning signs: ${screen.scam.signals.slice(0, 2).join("; ")}. Don't share any code, card details or open their link. If you want to check, call the company's official number yourself. I've let your family know.`;

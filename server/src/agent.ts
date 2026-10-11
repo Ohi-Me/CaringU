@@ -219,6 +219,11 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       mcp = await connectMcp(mcpUrl, emit, { elicitation: req.body?.elicitation === true, speaker });
       const lastUser = history[history.length - 1].text;
       const screen = await runScreen(lastUser, speaker, mcp.call, emit);
+      const photoId = typeof req.body?.photo_id === "string" && /^ph_[a-f0-9]{12}$/.test(req.body.photo_id) ? req.body.photo_id : undefined;
+      if (photoId) {
+        screen.photoId = photoId;
+        screen.notes.push(`The user attached a photo of a medicine strip (photo_id=${photoId}). Call inspect_medicine_strip with it and explain the verdict in plain words.`);
+      }
       let text: string, mode = bedrockConfigured() ? "bedrock" : "rules";
       let fallback: { from: string; reason: string } | null = null;
       if (screen.terminalReply) {
