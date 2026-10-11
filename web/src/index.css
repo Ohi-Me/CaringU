@@ -139,3 +139,4 @@ h2 { font-size: 1rem; margin: 0 0 .6rem; }
 .device-label .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-2) 25%, transparent); }
 .device-label .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .sub b { color: var(--accent); }
+.answered { font-size: .8rem; margin: .4rem 0 0; }

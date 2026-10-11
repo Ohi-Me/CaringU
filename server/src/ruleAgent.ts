@@ -168,7 +168,15 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     ].filter(Boolean).join(" ");
   }
 
-  // ---- 10. Default: today's overview ----
+  // ---- 10. Greetings, "who are you", thanks: answer them instead of reciting the schedule ----
+  if (/\b(who are you|what are you|introduce yourself|your name|what can you do|help me|how does this work)\b/.test(lower))
+    return "I'm CareCircle, your voice helper. I can tell you which medicines are due, note when you take them, check a call or message you're unsure about, keep track of how you feel, and let Ravi and Neha know when you need them.";
+  if (/^\s*(thanks|thank you|ok thanks|shukriya|dhanyavad)\b/.test(lower)) return "You're welcome. I'm here whenever you need me.";
+  const isGreeting = /^\s*(hi|hello|hey|namaste|good (morning|afternoon|evening))\b/.test(lower);
+
+  // ---- 11. Today's overview, only when that is what was asked (or with a greeting) ----
+  if (!isGreeting && !/\b(today|schedule|plan|what (do|should) i (need|have) to do|what'?s on|due|medicines?|pills?|tablets?|day)\b/.test(lower))
+    return "Sorry, I didn't quite get that. You can ask me about your medicines, an appointment, a call or message you're unsure about, or tell me how you're feeling.";
   const ov = await call("get_care_overview", {});
   if (!ov.ok) return `I couldn't load today's plan: ${err(ov)}`;
   const s = ov.data.medication_schedule;
@@ -176,6 +184,7 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
   const missed = s.filter((x: any) => x.status === "missed");
   const appt = ov.data.appointments[0];
   return [
+    isGreeting ? `Hello ${first(speaker)}, I'm CareCircle.` : "",
     due.length ? `It's time for your ${list(due.map((x: any) => x.medication))}.` : missed.length ? "" : "No medicines are due right now.",
     missed.length ? `I don't have a record of ${list(missed.map((x: any) => `${x.medication} from ${x.time}`))}. Did you take ${missed.length > 1 ? "them" : "it"}?` : "",
     appt ? `You have ${appt.title} at ${time(appt.starts_at)} today.` : "",

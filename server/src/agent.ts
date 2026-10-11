@@ -98,8 +98,48 @@ export function bedrockConfigured() {
     || existsSync(join(homedir(), ".aws", "credentials")) || existsSync(join(homedir(), ".aws", "config")));
 }
 
-async function bedrockAgent(history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date, screen: ScreenOutcome) {
+/** Thrown when Bedrock fails after it already changed state, so a fallback must NOT redo the work. */
+class PartialFailure extends Error {
+  constructor(public cause: unknown, public writes: { name: string; result: any }[]) { super("bedrock failed after writes"); }
+}
+
+/**
+ * Checks whether AWS credentials resolve for the Bedrock client (no model call,
+ * nothing secret returned). Cached briefly so the UI can poll it.
+ */
+let credCache: { at: number; value: { ok: boolean; error?: string } } | null = null;
+export async function bedrockCredentialStatus() {
+  if (credCache && Date.now() - credCache.at < 30_000) return credCache.value;
+  let value: { ok: boolean; error?: string };
+  try {
+    const br = new BedrockRuntimeClient({ region: REGION });
+    await Promise.race([br.config.credentials(), new Promise((_, rej) => setTimeout(() => rej(new Error("timed out resolving credentials")), 4000))]);
+    value = { ok: true };
+  } catch (e: any) {
+    value = { ok: false, error: `${e?.name ?? "Error"}: ${String(e?.message ?? e).slice(0, 140)}` };
+  }
+  credCache = { at: Date.now(), value };
+  return value;
+}
+
+async function bedrockAgent(history: Turn[], speaker: string, tools: any[], rawCall: CallTool, emit: Emit, now: Date, screen: ScreenOutcome) {
   const br = new BedrockRuntimeClient({ region: REGION });
+  const readOnly = new Set(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name));
+  const writes: { name: string; result: any }[] = [];
+  const call: CallTool = async (name, args) => {
+    const r = await rawCall(name, args);
+    if (!readOnly.has(name) && r?.ok !== false) writes.push({ name, result: r });
+    return r;
+  };
+  try {
+    return await bedrockLoop(br, history, speaker, tools, call, emit, now, screen);
+  } catch (e) {
+    if (writes.length) throw new PartialFailure(e, writes);
+    throw e;
+  }
+}
+
+async function bedrockLoop(br: BedrockRuntimeClient, history: Turn[], speaker: string, tools: any[], call: CallTool, emit: Emit, now: Date, screen: ScreenOutcome) {
   const toolConfig = {
     tools: tools.map((t) => ({ toolSpec: { name: t.name, description: t.description, inputSchema: { json: t.inputSchema } } })) as Tool[],
   };
@@ -151,7 +191,13 @@ function guarded(call: CallTool, lastUser: string, emit: Emit): CallTool {
 
 export function agentRouter(mcpUrl: string, clock: Clock) {
   const r = Router();
-  r.get("/mode", (_req, res) => res.json({ mode: bedrockConfigured() ? "bedrock" : "rules", model: bedrockConfigured() ? MODEL_ID : null }));
+  // configured = what .env asks for; credentials = whether AWS credentials actually resolve right now.
+  r.get("/mode", async (_req, res) => {
+    const configured = bedrockConfigured() ? "bedrock" : "rules";
+    const credentials = configured === "bedrock" ? await bedrockCredentialStatus() : null;
+    res.json({ mode: configured, configured, model: configured === "bedrock" ? MODEL_ID : null, region: configured === "bedrock" ? REGION : null,
+      credentials, effective: configured === "bedrock" && credentials?.ok ? "bedrock" : "rules" });
+  });
   // The device posts the person's answer to a pending elicitation here.
   r.post("/elicit/:id", (req, res) => {
     const resolve = pendingElicitations.get(req.params.id);
@@ -174,23 +220,39 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       const lastUser = history[history.length - 1].text;
       const screen = await runScreen(lastUser, speaker, mcp.call, emit);
       let text: string, mode = bedrockConfigured() ? "bedrock" : "rules";
+      let fallback: { from: string; reason: string } | null = null;
       if (screen.terminalReply) {
         text = screen.terminalReply;
         mode = "safety-screen";
       } else if (mode === "bedrock") {
         try { text = enforce(await bedrockAgent(history, speaker, mcp.tools, guarded(mcp.call, lastUser, emit), emit, clock(), screen), screen); }
         catch (e: any) {
-          // Honest degradation: say the model failed, then use the deterministic planner.
-          emit({ type: "warning", message: `Bedrock unavailable (${e?.name ?? "error"}: ${String(e?.message ?? e).slice(0, 160)}). Falling back to rule-based planner.` });
-          mode = "rules";
-          text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
+          const err = e instanceof PartialFailure ? e.cause as any : e;
+          const reason = `${err?.name ?? "Error"}: ${String(err?.message ?? err).slice(0, 160)}`;
+          if (e instanceof PartialFailure) {
+            // Bedrock already changed state: report exactly that instead of letting a fallback repeat it.
+            emit({ type: "warning", message: `Bedrock failed after ${e.writes.length} change(s) (${reason}). Not retrying with the rule planner to avoid duplicate actions.` });
+            mode = "bedrock-partial";
+            fallback = { from: "bedrock", reason };
+            text = `Something went wrong part-way. These changes were saved: ${e.writes.map((w) => w.name.replace(/_/g, " ")).join(", ")}. Nothing else was done; please check the family dashboard.`;
+          } else {
+            // Nothing changed yet, so the deterministic planner can safely answer instead.
+            emit({ type: "warning", message: `Bedrock unavailable (${reason}). Falling back to rule-based planner.` });
+            mode = "rules";
+            fallback = { from: "bedrock", reason };
+            text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
+          }
         }
       } else text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
       if (screen.wellbeingLogged && mode !== "safety-screen" && screen.triage.signals.includes("fall") && !/\bhurt\b/i.test(text))
         text = `Are you hurt, and can you get up by yourself? If not, say "help" and call 112. I've let your family know. ${text}`;
       else if (screen.wellbeingLogged && mode !== "safety-screen" && !/family|ravi|neha/i.test(text))
         text = `I've noted how you're feeling and let your family know. ${text}`;
-      emit({ type: "final", text, mode, total_ms: Math.round(performance.now() - t0) });
+      const total_ms = Math.round(performance.now() - t0);
+      const model = mode === "bedrock" || mode === "bedrock-partial" ? MODEL_ID : null;
+      // One log line per request: who answered, and why if it was a fallback. No prompts or credentials.
+      console.log(`[agent] answered_by=${mode}${model ? ` model=${model}` : ""}${fallback ? ` fallback_from=${fallback.from} reason="${fallback.reason}"` : ""} ms=${total_ms}`);
+      emit({ type: "final", text, mode, model, fallback, total_ms });
     } catch (e: any) {
       emit({ type: "error", message: `Could not reach the CareCircle MCP server: ${e?.message ?? e}` });
     } finally {

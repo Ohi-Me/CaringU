@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { callTool, onTrace, setElicitHandler, trace, type TraceEvent } from "./mcp";
 
-type Turn = { role: "user" | "assistant"; text: string };
+type AnsweredBy = { mode: string; model: string | null; fallback: { from: string; reason: string } | null };
+type Turn = { role: "user" | "assistant"; text: string; by?: AnsweredBy };
+type ModeInfo = { configured: string; model: string | null; effective: string; credentials: { ok: boolean; error?: string } | null };
 type Orb = "idle" | "listening" | "thinking" | "speaking";
 
 // Ordered to follow the demo story: scam call, duplicate dose, refill approval, stroke signs.
@@ -25,7 +27,7 @@ export default function App() {
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [tab, setTab] = useState<"family" | "trace">("family");
   const [mobilePane, setMobilePane] = useState<"echo" | "side">("echo");
-  const [mode, setMode] = useState<{ mode: string; model: string | null } | null>(null);
+  const [mode, setMode] = useState<ModeInfo | null>(null);
   const [tick, setTick] = useState(0);
   const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
   // A question the MCP server is asking the person on this device (elicitation), relayed by the agent.
@@ -37,7 +39,8 @@ export default function App() {
   orbRef.current = orb;
 
   useEffect(() => onTrace((e) => setEvents((xs) => [e, ...xs].slice(0, 200))), []);
-  useEffect(() => { fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null)); }, []);
+  // Re-checked after every reply, so the badge reflects whether Bedrock credentials work right now.
+  useEffect(() => { fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null)); }, [tick]);
   useEffect(() => {
     const load = () => fetch("/api/clock").then((r) => r.json()).then(setClock).catch(() => {});
     load(); const t = setInterval(load, 30000); return () => clearInterval(t);
@@ -91,6 +94,7 @@ export default function App() {
     setOrb("thinking");
     trace({ source: "agent", kind: "user", label: `“${text}”` });
     let final = "";
+    let by: AnsweredBy | undefined;
     try {
       const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker, elicitation: true }) });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
@@ -119,14 +123,18 @@ export default function App() {
           else if (e.type === "elicit_answer") { trace({ source: "agent", kind: "elicitation", label: `Answer sent to server: ${e.answer}`, ok: e.answer !== "no answer" }); setDeviceAsk(null); }
           else if (e.type === "guard") trace({ source: "agent", kind: "guard", label: `Blocked ${e.name}: ${e.reason}`, ok: false, detail: e.args });
           else if (e.type === "error") { trace({ source: "agent", kind: "error", label: e.message, ok: false }); final = `Sorry, I couldn't reach CareCircle. ${e.message}`; }
-          else if (e.type === "final") { final = e.text; trace({ source: "agent", kind: "final", label: `${e.mode === "bedrock" ? "Bedrock agent" : e.mode === "safety-screen" ? "Safety screen" : "Rule agent"} replied in ${e.total_ms} ms`, ok: true }); }
+          else if (e.type === "final") {
+            final = e.text;
+            by = { mode: e.mode, model: e.model ?? null, fallback: e.fallback ?? null };
+            trace({ source: "agent", kind: "final", label: `${answeredLabel(by)} · ${e.total_ms} ms`, ok: !e.fallback });
+          }
         }
       }
     } catch (e: any) {
       final = `Sorry, something went wrong (${e?.message ?? e}). Nothing new was saved.`;
       trace({ source: "agent", kind: "error", label: final, ok: false });
     }
-    setTurns((t) => [...t, { role: "assistant", text: final }]);
+    setTurns((t) => [...t, { role: "assistant", text: final, by }]);
     setTick((x) => x + 1);
     speak(final);
   }, [turns, orb, speaker, speak]);
@@ -187,8 +195,9 @@ export default function App() {
           </div>
         </div>
         <div className="top-actions">
-          <span className={`pill ${mode?.mode === "bedrock" ? "pill-good" : "pill-muted"}`} title={mode?.model ?? "Deterministic rule-based planner"}>
-            {mode ? (mode.mode === "bedrock" ? "Amazon Bedrock agent" : "Rule-based agent") : "Agent offline"}
+          <span className={`pill ${mode?.effective === "bedrock" ? "pill-good" : mode?.configured === "bedrock" ? "pill-warn" : "pill-muted"}`}
+            title={mode?.credentials && !mode.credentials.ok ? `Bedrock configured but credentials failed: ${mode.credentials.error}` : mode?.model ?? "Deterministic rule-based planner"}>
+            {!mode ? "Agent offline" : mode.effective === "bedrock" ? "Amazon Bedrock · Nova Pro" : mode.configured === "bedrock" ? "Bedrock credentials failed → rule fallback" : "Rule-based agent"}
           </span>
           <span className="pill pill-muted">MCP 2025-11-25 · Streamable HTTP</span>
           {clock && <span className={`pill ${clock.simulated ? "pill-warn" : "pill-muted"}`} title={clock.now}>{clock.simulated ? "Demo time " : "Time "}{new Date(clock.now).toTimeString().slice(0, 5)}</span>}
@@ -233,7 +242,7 @@ export default function App() {
           <div className="exchange" aria-live="polite">
             {lastUser && <p className="heard">“{lastUser.text}”</p>}
             {orb === "thinking" ? <p className="reply muted">Checking CareCircle…</p>
-              : lastAssistant ? <p className="reply">{lastAssistant.text}</p>
+              : lastAssistant ? <><p className="reply">{lastAssistant.text}</p>{lastAssistant.by && <p className={`answered ${lastAssistant.by.fallback ? "warn-text" : "muted"}`}>{answeredLabel(lastAssistant.by)}</p>}</>
               : <p className="reply muted">Hi Asha. Ask me about your medicines, appointments, or anything that worries you.</p>}
           </div>
 
@@ -487,4 +496,12 @@ function Trace({ events }: { events: TraceEvent[] }) {
       </div>
     </div>
   );
+}
+
+function answeredLabel(by: AnsweredBy) {
+  if (by.mode === "safety-screen") return "Answered by the deterministic safety screen";
+  if (by.mode === "bedrock") return `Answered by Amazon Bedrock (${by.model})`;
+  if (by.mode === "bedrock-partial") return `Bedrock failed part-way (${by.fallback?.reason}); no retry, to avoid duplicate actions`;
+  if (by.fallback) return `Rule-based fallback: Bedrock unavailable (${by.fallback.reason})`;
+  return "Answered by the rule-based planner";
 }
