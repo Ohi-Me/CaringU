@@ -12,7 +12,15 @@ export interface TriageResult { triage: Triage; signals: string[] }
 
 // ---------- clause handling: negation and third-party mentions ----------
 const NEGATION = /\b(no|not|don'?t|doesn'?t|didn'?t|never|without|isn'?t|aren'?t|wasn'?t|haven'?t|hasn'?t|no longer|anymore|nahi|nahin)\b/i;
-const THIRD_PARTY = /\b(my (friend|neighbou?r|husband|wife|sister|brother|cousin|colleague|dog|cat)|(a|the) (movie|film|show|book|story|news)|someone else|he|she|they|his|her)\b/i;
+const THIRD_PARTY = /\b(((my|her|his|our|their) )?(friend|neighbou?r|husband|wife|sister|brother|cousin|colleague|son|daughter|grandson|granddaughter|boss|dog|cat)|(a|the) (movie|film|show|book|story|news)|someone else|he|she|they|his|her)\b/i;
+
+// Names of the other people in the household (caregivers), so "Neha fainted" is not
+// read as the user fainting. Kept in sync from the database (see family.syncKnownPeople).
+let OTHER_PEOPLE: RegExp | null = null;
+export function setOtherPeople(names: string[]) {
+  const clean = names.map((n) => n.trim().toLowerCase()).filter((n) => /^[a-z][a-z .'-]{1,40}$/.test(n));
+  OTHER_PEOPLE = clean.length ? new RegExp(`\\b(${clean.map((n) => n.replace(/[.'-]/g, "\\$&")).join("|")})('s)?\\b`) : null;
+}
 const FIRST_PERSON = /\b(i|i'?m|i'?ve|me|my|mine|myself|maine|mujhe|mera|meri)\b/i;
 
 function clauses(text: string) {
@@ -25,7 +33,13 @@ function affirmed(clause: string, re: RegExp) {
   if (!m) return false;
   const before = clause.slice(0, m.index);
   if (NEGATION.test(before) || /\b(any ?more|anymore|no more)\b/.test(clause.slice(m.index))) return false;
-  if (THIRD_PARTY.test(before) && !FIRST_PERSON.test(before.replace(THIRD_PARTY, ""))) return false;
+  const isOther = (t: string) => THIRD_PARTY.test(t) || (OTHER_PEOPLE?.test(t) ?? false);
+  const strip = (t: string) => {
+    let r = t.replace(new RegExp(THIRD_PARTY.source, "gi"), "");
+    if (OTHER_PEOPLE) r = r.replace(new RegExp(OTHER_PEOPLE.source, "g"), "");
+    return r;
+  };
+  if (isOther(before) && !FIRST_PERSON.test(strip(before))) return false;
   if (/\b(about|watched|read|heard about|news about|movie about)\b/.test(before)) return false;
   return true;
 }
@@ -40,7 +54,7 @@ const URGENT: Rule[] = [
   [/\b(sudden(ly)?\b.{0,25}\b(can'?t see|lost? (my )?(sight|vision)|blind)|can'?t see out of)\b/, "sudden vision loss"],
   [/\b(worst headache|sudden(ly)? (severe|terrible|very bad) headache|thunderclap)\b/, "sudden severe headache"],
   // Heart
-  [/\bchest\b.{0,25}\b(pain|pressure|tight\w*|heav\w*|crush\w*|squeez\w*|hurts?)\b|\b(pain|pressure|tight\w*|heav\w*)\b.{0,25}\bchest\b/, "chest pain/pressure"],
+  [/\bchest\b.{0,25}\b(pain|pressure|tight\w*|heav\w*|crush\w*|squeez\w*|hurts?)\b|\b(pain|pressure|tight\w*|heav\w*)\b.{0,25}\bchest\b|\b(sitting on|weight on|heavy on|elephant|band (around|round)|crushing)\b.{0,30}\bchest\b/, "chest pain/pressure"],
   [/\b(pain|ache)\b.{0,30}\b(spread\w*|going|radiat\w*)\b.{0,20}\b(arm|jaw|neck|back)\b/, "pain spreading to arm/jaw"],
   // Breathing
   [/\b(can'?t|cannot|hard to|difficult to|struggling to|trouble) (breathe|breathing)|\b(short(ness)? of breath|breathless|gasping|choking)\b/, "breathing difficulty"],
@@ -108,8 +122,8 @@ const SCAM: ScamRule[] = [
   { re: /\b(police|cbi|ed officer|narcotics|customs|income ?tax|tax department|irs|court|judge|trai|cyber cell|crime branch|rbi)\b/, w: 20, label: "claims to be police / government / regulator", type: "impersonation" },
   { re: /\b(arrest\w*|digital arrest|warrant|case against|illegal activity|drugs|money laundering|jail|legal action)\b/, w: 25, label: "threat of arrest or legal trouble" },
   { re: /\b(stay on the (call|line|video)|don'?t (hang up|disconnect)|video call\b.{0,40}\b(uniform|police|officer))\b/, w: 30, label: "keeps you on the call (digital-arrest pattern)", strong: true, type: "digital arrest" },
-  { re: /\b(grand(son|daughter|child)|nephew|niece|son|daughter|[A-Z]?\w+'s friend|it'?s me)\b[\s\S]{0,80}\b(accident|hospital|jail|bail|police|stuck|arrested|in trouble|phone (broke|is broken|lost)|new number)\b/, w: 30, label: "family member in an emergency or on a new number", type: "family-emergency scam" },
-  { re: /\b(send|transfer|pay|need\w*)\b[\s\S]{0,40}\b(money|rupees|rs\.?|₹|\d{3,}|lakh|dollars|\$)\b|\b(money|rupees|lakh)\b[\s\S]{0,30}\b(urgent\w*|immediately|right now|new number)\b/, w: 20, label: "asks you to send money" },
+  { re: /\b(grand(son|daughter|child)|nephew|niece|son|daughter|\w+'s (friend|colleague|boss|classmate|teacher|neighbou?r|roommate)|it'?s me)\b[\s\S]{0,80}\b(accident|hospital|fainted|collapsed|admitted|jail|bail|police|stuck|arrested|in trouble|phone (broke|is broken|lost)|new number)\b/, w: 30, label: "says a family member is in an emergency or on a new number", type: "family-emergency scam" },
+  { re: /\b(send|transfer|pay|need\w*)\b[\s\S]{0,40}\b(money|rupees|rs\.?|₹|\d{3,}|lakh|dollars|\$|google pay|gpay|phonepe|paytm|upi)\b|\b(money|rupees|lakh)\b[\s\S]{0,30}\b(urgent\w*|immediately|right now|new number)\b/, w: 20, label: "asks you to send money" },
   { re: /\b(won|winner|lottery|prize|kbc|lucky draw|jackpot|cashback|refund|reward)\b/, w: 15, label: "prize, refund or cashback lure", type: "prize/refund lure" },
   { re: /\b(urgent\w*|immediately|right now|today|tonight|within (\d+|an?|one|two|24) ?(hours?|minutes?|hrs?)|in (\d+|two|2) hours|last chance|offer ends)\b/, w: 10, label: "pressure to act fast" },
   { re: /\b(will be|would be|is going to be|be) (blocked|suspended|frozen|closed|cut|disconnected|stopped|cancelled|deactivated)\b|\b(power|electricity|pension|account|number|sim)\b.{0,30}\b(cut|stop\w*|block\w*|disconnect\w*|suspend\w*)\b/, w: 20, label: "threat that a service or account will be cut off" },
@@ -125,7 +139,7 @@ const SCAM: ScamRule[] = [
 // Signs a message is a legitimate notification. They lower the score but never cancel a strong signal.
 const PROTECTIVE: [RegExp, string][] = [
   [/\b(do not|don'?t|never) share (it|this|your|the)\b/, "the message itself warns not to share codes"],
-  [/\b(call (the|us on the) (number|helpline) on the back of your card|official (app|website|number)|at the (office|branch)|visit the branch)\b/, "points you to the official channel"],
+  [/\b(call (the|us on the) (number|helpline) on the back of your card|official (app|website|number)|(pay|collect|visit)\b[^.]{0,25}\bat the (office|branch)|visit the branch)\b/, "points you to the official channel"],
   [/\b(ready for pick-?up|has been shipped|is out for delivery|appointment (tomorrow|on)|confirm(ing)? (my|your) appointment|order of)\b/, "routine service notice"],
 ];
 const IN_PROGRESS = /\b(still on the (line|phone|call)|on the (line|phone|call) (now|right now)|is on the phone|waiting on the (line|phone)|he'?s waiting|she'?s waiting|they'?re waiting|right now on)\b/;
@@ -141,6 +155,8 @@ export function screenScam(text: string): ScamResult {
   const authority = hits.some((r) => r.label.startsWith("claims to be police"));
   const threat = hits.some((r) => r.label.startsWith("threat"));
   if (authority && threat) score += 20;
+  // A family emergency plus a money request is the core of the "grandparent" scam.
+  if (hits.some((r) => r.type === "family-emergency scam") && hits.some((r) => r.label === "asks you to send money")) score += 20;
   score = Math.max(0, Math.min(100, score));
   const verdict: ScamVerdict = (strong && score >= 35) || score >= 50 ? "likely_scam" : score >= 25 ? "suspicious" : "no_strong_signals";
   return {

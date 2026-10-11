@@ -27,3 +27,19 @@ test("scam: strong patterns are likely_scam; legitimate notices are not", () => 
   assert.equal(screenScam("your order has been shipped").verdict, "no_strong_signals");
   assert.equal(screenScam("he is still on the line asking for my PIN").in_progress, true);
 });
+
+import { setOtherPeople } from "../src/safety.js";
+
+test("crushing-chest metaphors are urgent", () => {
+  for (const s of ["there's a heavy weight on my chest", "it feels like a band around my chest", "something crushing my chest"])
+    assert.equal(triageText(s).triage, "urgent", s);
+});
+
+test("symptoms of other household members are not her emergency; the money request is a scam", () => {
+  setOtherPeople(["Ravi", "Neha"]);
+  assert.equal(triageText("Ravi collapsed at work, his boss called").triage, "routine");
+  assert.equal(triageText("Neha's teacher friend says Neha fainted").triage, "routine");
+  assert.equal(triageText("I fainted after Ravi left").triage, "urgent", "her own symptom still counts");
+  const s = screenScam("A man says he is Ravi's colleague, Ravi is admitted in hospital, send 15000 on PhonePe now");
+  assert.equal(s.verdict, "likely_scam");
+});

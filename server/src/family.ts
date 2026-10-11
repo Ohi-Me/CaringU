@@ -3,6 +3,7 @@
 // (demo) clock, so escalation can be tested and demonstrated reproducibly.
 import { randomUUID } from "node:crypto";
 import type { DB } from "./db.js";
+import { setOtherPeople } from "./safety.js";
 
 type Row = Record<string, any>;
 export const ESCALATION_MINUTES = Number(process.env.ESCALATION_MINUTES ?? 3);
@@ -115,4 +116,9 @@ export function markHeard(db: DB, now: Date, ids: string[]) {
 export function recentMessages(db: DB, limit = 10) {
   return (db.prepare("SELECT * FROM messages ORDER BY at DESC LIMIT ?").all(limit) as Row[])
     .map((m) => ({ from: m.from_name, text: m.text, at: hhmm(m.at), heard: !!m.heard_at }));
+}
+
+/** Tell the safety screen who the other people in the household are ("Neha fainted" is about Neha). */
+export function syncKnownPeople(db: DB) {
+  setOtherPeople(caregivers(db).map((c) => String(c.name)));
 }

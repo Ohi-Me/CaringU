@@ -20,7 +20,7 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
 
   // ---- 0. The screen flagged a call/message as suspicious (not certain): advise caution ----
   if (screen.scamChecked && screen.scam?.verdict === "suspicious")
-    return `Be careful, that sounds suspicious: it ${list(screen.scam.signals.slice(0, 2))}. Don't share any code, card details or open their link. If you want to check, call the company's official number yourself. I've let your family know.`;
+    return `Be careful, that sounds suspicious. Warning signs: ${screen.scam.signals.slice(0, 2).join("; ")}. Don't share any code, card details or open their link. If you want to check, call the company's official number yourself. I've let your family know.`;
 
   // ---- 1. Answers to a question we just asked ----
   const dupQ = /records show (\w+) at (\d{1,2}:\d{2})\. is that the dose you mean/i.exec(prev);
@@ -72,14 +72,21 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     const r = await call("check_dose_status", { medication: med });
     if (!r.ok) return medError(r, med) ?? `I couldn't check: ${err(r)}`;
     const d = r.data;
-    if (d.recorded_within_min_gap) return `You already took your ${d.medication.name} at ${time(d.last_recorded)}. Please don't take another one. The next one is at ${time(d.next_scheduled)}.`;
+    const today = ymd(now);
+    if (d.recorded_within_min_gap) {
+      const when = d.last_recorded.startsWith(today) ? `at ${time(d.last_recorded)}` : `yesterday at ${time(d.last_recorded)}`;
+      return `Yes, I have your ${d.medication.name} recorded ${when}. Please don't take another one now. The next one is at ${time(d.next_scheduled)}${d.next_scheduled?.startsWith(today) ? " today" : ""}.`;
+    }
     const todaySlot = d.today.find((s: any) => s.status === "due_now" || s.status === "missed");
     if (todaySlot) return `I don't have a record of your ${todaySlot.time} ${d.medication.name} today. If your pill organiser shows it's still there, it's due${d.medication.with_food ? ", with food" : ""}. If you're not sure whether you took it, please check with your pharmacist rather than risk a double dose. Tell me when you've taken it.`;
     return `Your last recorded ${d.medication.name} was ${d.last_recorded ? `at ${d.last_recorded}` : "never"}. The next one is scheduled for ${time(d.next_scheduled)}.`;
   }
 
   // ---- 4. "I took my X" -> record (duplicate-aware) ----
-  if (/\b(i (just |already )?(took|take|had)|i'?ve (just |already )?(taken|had)|i have (just |already )?(taken|had)|just (took|had)|taken my|(le|kha|khaa) (li|liya|lii)|li hai|le chuki|kha chuki)\b/.test(lower)) {
+  // "had" only counts with a medicine in the sentence, so "I have had a cough" is not a dose report.
+  const mentionsMedicine = MED_WORDS.test(lower) || /\b(pills?|tablets?|medicines?|meds?|dose|capsules?|goli|dawai|dawa)\b/.test(lower);
+  if (/\b(i (just |already )?(took|take)|i'?ve (just |already )?taken|i have (just |already )?taken|just took|taken my|(le|kha|khaa) (li|liya|lii)|li hai|le chuki|kha chuki)\b/.test(lower)
+    || (mentionsMedicine && /\b(i (just |already )?had|i'?ve (just |already )?had|i have (just |already )?had|just had)\b/.test(lower))) {
     const med = medRef(lower);
     if (!med) return "Which medicine did you take?";
     const taken_at = whenTaken(lower, now);
@@ -174,9 +181,25 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
   if (/^\s*(thanks|thank you|ok thanks|shukriya|dhanyavad)\b/.test(lower)) return "You're welcome. I'm here whenever you need me.";
   const isGreeting = /^\s*(hi|hello|hey|namaste|good (morning|afternoon|evening))\b/.test(lower);
 
-  // ---- 11. Today's overview, only when that is what was asked (or with a greeting) ----
-  if (!isGreeting && !/\b(today|schedule|plan|what (do|should) i (need|have) to do|what'?s on|due|medicines?|pills?|tablets?|day)\b/.test(lower))
+  // ---- 11. "What is my X for?" ----
+  const purposeQ = /\b(what(?:'s| is| are)? (?:my |the )?([a-z-]{3,}) (?:for|used for)|why do i take (?:my |the )?([a-z-]{3,})|what does (?:my |the )?([a-z-]{3,}) do)\b/.exec(lower);
+  if (purposeQ) {
+    const name = purposeQ[2] ?? purposeQ[3] ?? purposeQ[4];
+    const r = await call("list_medications", {});
+    if (r.ok) {
+      const m = (r.data as any[]).find((x) => x.name.toLowerCase().startsWith(name) || name.startsWith(x.name.toLowerCase().slice(0, 5)) || (x.purpose ?? "").includes(name));
+      if (m) return `${m.name} ${m.dose} is for ${m.purpose}. You take it at ${list(m.times)}${m.with_food ? ", with food" : ""}. Your doctor or pharmacist can tell you more about it.`;
+      return `I don't see ${name} in your medicine list, which has ${list((r.data as any[]).map((x) => x.name))}.`;
+    }
+  }
+
+  // ---- 12. Today's overview, only when that is what was asked (or with a greeting) ----
+  if (!isGreeting && !/\b(today|schedule|plan|what (do|should) i (need|have) to do|what'?s on|due|medicines?|pills?|tablets?|day)\b/.test(lower)) {
+    // The safety screen already logged a symptom: acknowledge it properly instead of "didn't get that".
+    if (screen.wellbeingLogged)
+      return "I'm sorry you're not feeling well. Please sit down, rest and have some water. I've let your family know. If it gets worse, call your doctor, and tell me straight away if you feel faint or have chest pain.";
     return "Sorry, I didn't quite get that. You can ask me about your medicines, an appointment, a call or message you're unsure about, or tell me how you're feeling.";
+  }
   const ov = await call("get_care_overview", {});
   if (!ov.ok) return `I couldn't load today's plan: ${err(ov)}`;
   const s = ov.data.medication_schedule;
@@ -206,7 +229,8 @@ function outcome(d: any, askText: string) {
 function medRef(lower: string): string | null {
   const m = MED_WORDS.exec(lower);
   if (m) return m[1];
-  const u = /\b(?:took|taken|take|had|of) (?:my|the|a|an|one|another|some) ([a-z][a-z-]{2,})/.exec(lower);
+  const u = /\b(?:took|taken|take|had|of) (?:my|the|an?|one|another|some) ([a-z][a-z-]{2,})/.exec(lower);
+  if (u && /^(small|little|bad|big|mild|slight|cough|cold|fever|headache|pain)$/.test(u[1])) return null;
   return u && !GENERIC.has(u[1]) ? u[1] : null;
 }
 function medError(r: any, med: string) {
@@ -247,3 +271,4 @@ const first = (speaker: string) => speaker.split(" ")[0];
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 const names = (d: any) => list((d.delivered_to_dashboard_of ?? []).map((x: string) => x.split(" ")[0]));
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

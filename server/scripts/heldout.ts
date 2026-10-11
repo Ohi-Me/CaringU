@@ -58,7 +58,7 @@ triMiss.forEach((m) => log(`- ${m}`));
 
 // ---------- 3. conversations ----------
 type C = { cat: string; say: string; setup?: string[]; speaker?: string; requires?: string[]; forbids?: string[]; reply?: string; reply_not?: string };
-const convs = load("heldout-conversations.json").cases as C[];
+const convs = load(process.env.CONVS ?? "heldout-conversations.json").cases as C[];
 let mode = "offline";
 const conv: string[] = [];
 let pass = 0;

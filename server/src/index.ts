@@ -9,7 +9,7 @@ import { buildMcpServer } from "./mcp.js";
 import { resetDemo } from "./seed.js";
 import { activityLog, type Clock } from "./care.js";
 import { agentRouter } from "./agent.js";
-import { runEscalations } from "./family.js";
+import { runEscalations, syncKnownPeople } from "./family.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
@@ -19,6 +19,7 @@ const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
 let offsetMs = 0;
 const clock: Clock = () => new Date(Date.now() + offsetMs);
 if (!db.prepare("SELECT 1 FROM people LIMIT 1").get()) resetDemo(db, clock());
+syncKnownPeople(db);
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));

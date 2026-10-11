@@ -2,7 +2,7 @@
 // so the demo always shows a believable state (one missed dose, one low refill,
 // an appointment tomorrow with no transport arranged).
 import { type DB, tx } from "./db.js";
-import { logEvent } from "./family.js";
+import { logEvent, syncKnownPeople } from "./family.js";
 
 const HOUR = 3_600_000;
 
@@ -52,4 +52,5 @@ export function resetDemo(db: DB, now: Date) {
       .run("alert_seed_1", new Date(now.getTime() - 14 * HOUR).toISOString(), "warning", "missed_dose", "Metformin 20:30 was not recorded yesterday.");
     logEvent(db, "alert_seed_1", new Date(now.getTime() - 14 * HOUR), "notified", "family dashboard (Ravi, Neha)");
   });
+  syncKnownPeople(db);
 }

@@ -42,8 +42,8 @@ export async function runScreen(text: string, speaker: string, call: CallTool, e
     const r = await call("assess_scam_risk", { text, channel: /sms|text message/i.test(text) ? "sms" : /email/i.test(text) ? "email" : /whatsapp/i.test(text) ? "whatsapp" : "call" });
     out.scamChecked = true;
     if (scam.verdict === "likely_scam") {
-      const why = scam.signals.slice(0, 2).join(", and it ");
-      out.terminalReply = `${scam.in_progress ? "Hang up now. " : ""}This looks like a scam: it ${why}. Don't share any code or PIN, and don't pay, scan or install anything. Real banks and police never ask for that on the phone.${r?.ok ? ` I've alerted ${who(r)}.` : " I couldn't alert your family, so please call Ravi yourself."}`;
+      const why = scam.signals.slice(0, 2).join("; ");
+      out.terminalReply = `${scam.in_progress ? "Hang up now. " : ""}This looks like a scam. Warning signs: ${why}. Don't share any code or PIN, and don't pay, scan or install anything. Real banks and police never ask for that on the phone.${r?.ok ? ` I've alerted ${who(r)}.` : " I couldn't alert your family, so please call Ravi yourself."}`;
       return out;
     }
     out.notes.push(`assess_scam_risk was already called (verdict: suspicious; signals: ${scam.signals.join("; ")}); family warned. Tell the user not to share codes or pay, and to call back on an official number.`);
