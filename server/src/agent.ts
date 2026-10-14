@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { BedrockRuntimeClient, ConverseCommand, type Message, type Tool } from "@aws-sdk/client-bedrock-runtime";
 import { ruleAgent } from "./ruleAgent.js";
 import { enforce, runScreen, type ScreenOutcome } from "./screen.js";
+import { NEBIUS, nebiusConfigured, nebiusStatus, nemotronAgent } from "./nemotron.js";
 import type { Clock } from "./care.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -91,7 +92,15 @@ async function connectMcp(url: string, emit: Emit, opts: { elicitation: boolean;
   return { client, tools, call, close };
 }
 
+/** Which model provider answers: AGENT_MODE=nebius (Nemotron on Token Factory), bedrock, or rules. */
+export function activeProvider(): "nebius" | "bedrock" | "rules" {
+  if (nebiusConfigured()) return "nebius";
+  if (process.env.AGENT_MODE === "nebius") return "rules"; // asked for Nebius but no key: say so via /mode, answer with rules
+  return bedrockConfigured() ? "bedrock" : "rules";
+}
+
 export function bedrockConfigured() {
+  if (process.env.AGENT_MODE === "nebius") return false;
   if (process.env.AGENT_MODE === "rules") return false;
   return !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE || process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
     || process.env.AWS_WEB_IDENTITY_TOKEN_FILE || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI || process.env.AGENT_MODE === "bedrock"
@@ -191,9 +200,14 @@ function guarded(call: CallTool, lastUser: string, emit: Emit): CallTool {
 
 export function agentRouter(mcpUrl: string, clock: Clock) {
   const r = Router();
-  // configured = what .env asks for; credentials = whether AWS credentials actually resolve right now.
+  // configured = what .env asks for; credentials = whether that provider's credentials work right now.
   r.get("/mode", async (_req, res) => {
-    const configured = bedrockConfigured() ? "bedrock" : "rules";
+    const configured = activeProvider();
+    if (configured === "nebius") {
+      const st = await nebiusStatus();
+      return res.json({ mode: configured, configured, provider: "Nebius Token Factory", model: NEBIUS.fast,
+        models: { fast: NEBIUS.fast, reason: NEBIUS.reason, vision: NEBIUS.vision }, credentials: st, effective: st.ok ? "nebius" : "rules" });
+    }
     const credentials = configured === "bedrock" ? await bedrockCredentialStatus() : null;
     res.json({ mode: configured, configured, model: configured === "bedrock" ? MODEL_ID : null, region: configured === "bedrock" ? REGION : null,
       credentials, effective: configured === "bedrock" && credentials?.ok ? "bedrock" : "rules" });
@@ -224,27 +238,40 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
         screen.photoId = photoId;
         screen.notes.push(`The user attached a photo of a medicine strip (photo_id=${photoId}). Call inspect_medicine_strip with it and explain the verdict in plain words.`);
       }
-      let text: string, mode = bedrockConfigured() ? "bedrock" : "rules";
+      const provider = activeProvider();
+      let text: string, mode: string = provider;
+      let usedModel: string | null = null;
       let fallback: { from: string; reason: string } | null = null;
+      const label = provider === "nebius" ? "Nemotron (Token Factory)" : "Bedrock";
       if (screen.terminalReply) {
         text = screen.terminalReply;
         mode = "safety-screen";
-      } else if (mode === "bedrock") {
-        try { text = enforce(await bedrockAgent(history, speaker, mcp.tools, guarded(mcp.call, lastUser, emit), emit, clock(), screen), screen); }
-        catch (e: any) {
+      } else if (provider !== "rules") {
+        try {
+          const guardedCall = guarded(mcp.call, lastUser, emit);
+          if (provider === "nebius") {
+            const out = await nemotronAgent(history, speaker, mcp.tools, guardedCall, emit, systemPrompt(clock(), speaker), screen);
+            text = enforce(out.text, screen);
+            usedModel = out.model;
+          } else {
+            text = enforce(await bedrockAgent(history, speaker, mcp.tools, guardedCall, emit, clock(), screen), screen);
+            usedModel = MODEL_ID;
+          }
+        } catch (e: any) {
+          const writes: { name: string }[] = e?.writes ?? [];
           const err = e instanceof PartialFailure ? e.cause as any : e;
           const reason = `${err?.name ?? "Error"}: ${String(err?.message ?? err).slice(0, 160)}`;
-          if (e instanceof PartialFailure) {
-            // Bedrock already changed state: report exactly that instead of letting a fallback repeat it.
-            emit({ type: "warning", message: `Bedrock failed after ${e.writes.length} change(s) (${reason}). Not retrying with the rule planner to avoid duplicate actions.` });
-            mode = "bedrock-partial";
-            fallback = { from: "bedrock", reason };
-            text = `Something went wrong part-way. These changes were saved: ${e.writes.map((w) => w.name.replace(/_/g, " ")).join(", ")}. Nothing else was done; please check the family dashboard.`;
+          if (writes.length) {
+            // The model already changed state: report exactly that instead of letting a fallback repeat it.
+            emit({ type: "warning", message: `${label} failed after ${writes.length} change(s) (${reason}). Not retrying with the rule planner to avoid duplicate actions.` });
+            mode = `${provider}-partial`;
+            fallback = { from: provider, reason };
+            text = `Something went wrong part-way. These changes were saved: ${writes.map((w) => w.name.replace(/_/g, " ")).join(", ")}. Nothing else was done; please check the family dashboard.`;
           } else {
             // Nothing changed yet, so the deterministic planner can safely answer instead.
-            emit({ type: "warning", message: `Bedrock unavailable (${reason}). Falling back to rule-based planner.` });
+            emit({ type: "warning", message: `${label} unavailable (${reason}). Falling back to rule-based planner.` });
             mode = "rules";
-            fallback = { from: "bedrock", reason };
+            fallback = { from: provider, reason };
             text = await ruleAgent(history, speaker, mcp.call, clock(), screen);
           }
         }
@@ -254,7 +281,7 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       else if (screen.wellbeingLogged && mode !== "safety-screen" && !/family|ravi|neha/i.test(text))
         text = `I've noted how you're feeling and let your family know. ${text}`;
       const total_ms = Math.round(performance.now() - t0);
-      const model = mode === "bedrock" || mode === "bedrock-partial" ? MODEL_ID : null;
+      const model = usedModel ?? (mode === "bedrock-partial" ? MODEL_ID : null);
       // One log line per request: who answered, and why if it was a fallback. No prompts or credentials.
       console.log(`[agent] answered_by=${mode}${model ? ` model=${model}` : ""}${fallback ? ` fallback_from=${fallback.from} reason="${fallback.reason}"` : ""} ms=${total_ms}`);
       emit({ type: "final", text, mode, model, fallback, total_ms });
