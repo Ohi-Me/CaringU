@@ -29,12 +29,16 @@ Current local time: ${now.toString()}. Current speaker: ${speaker}.
 Rules:
 - Facts come ONLY from tool results. Never guess whether a dose was taken; call check_dose_status or get_care_overview.
 - NEVER tell anyone a dose is safe to take. Say what is recorded and when it is scheduled. If they are unsure whether they took it, tell them to check their pill organiser or ask their pharmacist. For a missed dose, never advise taking it late: say the pharmacist or doctor should decide.
-- To log a dose use record_dose (pass taken_at "HH:MM" if they say when). If it returns status=possible_duplicate, ask its question_for_user. Only if they then say they took ANOTHER one, call record_dose with extra_dose_confirmed=true and read its guidance_for_user.
+- Whenever the user says they took a medicine (now, earlier, "this morning at 9"), ALWAYS call record_dose (pass taken_at "HH:MM" if they say when). Never answer such a statement with check_dose_status alone, and never tell them a dose is "due now" after they say they took it. If record_dose returns status=possible_duplicate, ask its question_for_user. Only if they then say they took ANOTHER one, call record_dose with extra_dose_confirmed=true and read its guidance_for_user.
+- If they forgot or missed a dose, do not ask which medicine first: tell them not to take two doses together to catch up, that their pharmacist or doctor should decide about a late dose, and offer to message the family.
+- A medicine is "running low" ONLY if forecast_refills returns needs_refill=true for it. For each such medicine, call request_refill (it asks the person for approval). Do not call medicines with more than a week's supply low.
 - request_refill, schedule_appointment and cancel_appointment ask the person for approval themselves when possible. Report the returned status truthfully (done / cancelled / awaiting_confirmation). If the status is awaiting_confirmation, read the summary and ask "Shall I go ahead?"; call confirm_action only after an explicit yes in the user's latest message.
 - Never claim something was done unless a tool result says so.
 - Symptoms: call log_wellbeing. For red flags, tell them to call emergency services (112 India / 911 US) now. Never diagnose or change medication.
 - If someone describes a call/message asking for money, codes, PINs or app installs, call assess_scam_risk.
 - If transport for an appointment is "NOT ARRANGED", offer to message the family.
+- To contact the family (Ravi, Neha) for Asha — a call, a ride, help — use notify_family. send_message_to_elder is ONLY for a caregiver sending a message TO Asha's device.
+- For appointments call list_appointments without a "days" limit (the default covers two weeks), then match the one they mean (e.g. "heart doctor" = cardiology).
 - Caregivers (Ravi, Neha) may ask for a summary (get_family_digest) or respond to alerts (respond_to_alert).
 - Use real ids from tool results only. If a request is ambiguous (e.g. which medicine), ask one short question.
 - Replies are spoken aloud: 1-3 short sentences, plain words, no markdown, no lists, no ids.`;
@@ -185,9 +189,14 @@ const EXTRA = /\b(another|again|extra|second|one more|twice|two)\b/i;
  * cannot approve a pending action or record an extra dose unless the user's
  * latest message actually says so. Caregivers approve from the dashboard.
  */
-function guarded(call: CallTool, lastUser: string, emit: Emit): CallTool {
+// Tools that act on behalf of a caregiver; the older adult's own turns must not use them.
+const CAREGIVER_ONLY = new Set(["send_message_to_elder", "respond_to_alert", "acknowledge_alert"]);
+
+function guarded(call: CallTool, lastUser: string, emit: Emit, speaker = "Asha (voice)"): CallTool {
   return async (name, args) => {
     let reason: string | null = null;
+    if (CAREGIVER_ONLY.has(name) && /^asha/i.test(speaker))
+      reason = `${name} is for caregivers. To contact Ravi or Neha for Asha, use notify_family.`;
     if (name === "confirm_action" && args.approve === true && !AFFIRM.test(lastUser))
       reason = "The user's latest message is not an explicit yes. Read the summary and ask them first.";
     if (name === "record_dose" && args.extra_dose_confirmed === true && !EXTRA.test(lastUser))
@@ -248,7 +257,7 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
         mode = "safety-screen";
       } else if (provider !== "rules") {
         try {
-          const guardedCall = guarded(mcp.call, lastUser, emit);
+          const guardedCall = guarded(mcp.call, lastUser, emit, speaker);
           if (provider === "nebius") {
             const out = await nemotronAgent(history, speaker, mcp.tools, guardedCall, emit, systemPrompt(clock(), speaker), screen);
             text = enforce(out.text, screen);

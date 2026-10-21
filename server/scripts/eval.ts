@@ -60,22 +60,32 @@ async function chat(history: Turn[]) {
     tools: lines.filter((e) => e.type === "tool_call").map((e) => e.name as string),
     toolMs: lines.filter((e) => e.type === "tool_result").map((e) => e.ms as number),
     final: lines.find((e) => e.type === "final") ?? lines.find((e) => e.type === "error"),
+    // Token usage reported by the provider (Bedrock: inputTokens/outputTokens; Token Factory: prompt/completion_tokens).
+    tokens: lines.filter((e) => e.type === "model").reduce((t, e) => ({
+      input: t.input + (e.usage?.inputTokens ?? e.usage?.prompt_tokens ?? 0),
+      output: t.output + (e.usage?.outputTokens ?? e.usage?.completion_tokens ?? 0),
+    }), { input: 0, output: 0 }),
   };
 }
+// LIMIT=n runs only the first n cases (cheap smoke tests on paid models).
+const CASES = C.slice(0, Number(process.env.LIMIT ?? C.length));
+const tokens = { input: 0, output: 0 };
 
 const rows: string[] = [];
 let pass = 0; let mode = "";
 const toolLat: number[] = []; const totalLat: number[] = [];
-for (const [i, c] of C.entries()) {
+for (const [i, c] of CASES.entries()) {
   await reset();
   const history: Turn[] = [];
   for (const s of c.setup ?? []) {
     history.push({ role: "user", text: s });
     const r = await chat(history);
+    tokens.input += r.tokens.input; tokens.output += r.tokens.output;
     history.push({ role: "assistant", text: r.final?.text ?? "" });
   }
   history.push({ role: "user", text: c.say });
   const r = await chat(history);
+  tokens.input += r.tokens.input; tokens.output += r.tokens.output;
   mode = r.final?.mode ?? mode;
   toolLat.push(...r.toolMs);
   if (r.final?.total_ms) totalLat.push(r.final.total_ms);
@@ -101,9 +111,10 @@ Each case resets the sample data, sends the request(s) through the real path
 (agent -> MCP Streamable HTTP -> tools -> SQLite) and checks which tools were called
 and what the spoken reply says. Every case written is reported, pass or fail.
 
-**Result: ${pass}/${C.length} passed.**
+**Result: ${pass}/${CASES.length} passed.**
 
 - MCP tool round-trip seen by the agent: median ${pct(toolLat, 0.5)} ms, p95 ${pct(toolLat, 0.95)} ms (${toolLat.length} calls).
+- Model tokens for the whole run: ${tokens.input} input + ${tokens.output} output (provider-reported).
 - Whole request (connect + initialize + tools/list + tool calls + ${mode === "bedrock" ? "model" : "planner"} + reply): median ${pct(totalLat, 0.5)} ms, p95 ${pct(totalLat, 0.95)} ms.
 
 | # | Category | Request | Tools called | Result | Reply |
@@ -113,4 +124,4 @@ ${rows.join("\n")}
 mkdirSync("../docs", { recursive: true });
 const out = `../docs/evaluation-${mode || "unknown"}.md`;
 writeFileSync(out, md);
-console.log(`\n${pass}/${C.length} passed (mode ${mode}). Wrote ${out}`);
+console.log(`\n${pass}/${CASES.length} passed (mode ${mode}). Wrote ${out}`);

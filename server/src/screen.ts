@@ -61,6 +61,8 @@ const who = (r: any) => {
 /** Last line of defence for LLM replies: the safety instruction must be in the reply. */
 export function enforce(reply: string, s: ScreenOutcome) {
   // Records only contain reported doses: a model must not state as fact that a dose was not taken.
+  // Normalise typographic characters first (models use curly apostrophes and non-breaking hyphens).
+  reply = reply.replace(/[‘’]/g, "'").replace(/[‐‑‒–]/g, "-").replace(/ /g, " ");
   reply = reply.replace(/\byou (have not|haven't|did not|didn't) (taken|take|had)\b/gi, "I don't have a record of you taking");
   if (s.triage.triage === "urgent" && !/\b(112|911|emergency)\b/i.test(reply)) return `${EMERGENCY_LINE} ${reply}`;
   if (s.scam?.verdict === "likely_scam" && !/\b(scam|hang up|don'?t share|do not share)\b/i.test(reply)) return `This looks like a scam; don't share any code or pay anything. ${reply}`;
