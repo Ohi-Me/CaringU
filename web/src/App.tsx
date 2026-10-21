@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { callTool, onTrace, setElicitHandler, trace, type TraceEvent } from "./mcp";
 
 type AnsweredBy = { mode: string; model: string | null; fallback: { from: string; reason: string } | null };
@@ -303,6 +303,7 @@ export default function App() {
           </div>
         </section>
       </main>
+      <Features />
       <footer className="foot">
         Not a medical device and not connected to Alexa or any Echo device. Emergency: call 112 (India) / 911 (US).
       </footer>
@@ -554,6 +555,65 @@ function StripCard({ busyKey, setBusyKey }: { busyKey: string | null; setBusyKey
         {msg?.preview && <img className="reg-preview" src={msg.preview} alt="Detected cavities on the reference strip" />}
       </details>
     </div>
+  );
+}
+
+// ---------------- What CareCircle does (illustrated explainer) ----------------
+const FEATURES: { title: string; body: string; example: string; art: React.ReactElement }[] = [
+  {
+    title: "Scam guard",
+    body: "Asha describes a call or message. CareCircle checks it against common scam patterns before she shares anything.",
+    example: "\"The bank man wants my OTP\" → \"Hang up now\", and Ravi is alerted.",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="20" y="8" width="34" height="56" rx="7" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="26" y="16" width="22" height="30" rx="3" fill="var(--tint-cream)" /><path d="M58 22c8 0 16 4 16 4v14c0 10-8 16-16 19-8-3-16-9-16-19V26s8-4 16-4z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /><path d="M58 32v10" stroke="var(--sindoor)" strokeWidth="3" strokeLinecap="round" /><circle cx="58" cy="48" r="2" fill="var(--sindoor)" /></svg>),
+  },
+  {
+    title: "Dose check",
+    body: "Every \"I took my pill\" is checked against the record. If it looks like a second dose, CareCircle asks before anything else.",
+    example: "\"Is that the dose you mean, or did you take another one?\"",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><circle cx="36" cy="36" r="22" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><path d="M36 22v14l9 6" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" fill="none" /><rect x="56" y="26" width="30" height="14" rx="7" transform="rotate(-30 71 33)" fill="var(--tint-pistachio)" stroke="var(--tulsi)" strokeWidth="2.5" /><path d="M66 38l9-15" stroke="var(--tulsi)" strokeWidth="2" /></svg>),
+  },
+  {
+    title: "Strip check (camera)",
+    body: "Show a medicine strip to the camera. OpenCV recognises the medicine and counts what's left, then compares it with the record.",
+    example: "One more pill gone than recorded → \"Did you take it? Shall I note it?\"",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="10" y="18" width="62" height="36" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" />{[0, 1, 2, 3].map((i) => <circle key={`a${i}`} cx={22 + i * 13} cy="29" r="5" fill={i === 3 ? "var(--paper)" : "var(--tint-mint)"} stroke="var(--tulsi)" strokeWidth="2" />)}{[0, 1, 2, 3].map((i) => <circle key={`b${i}`} cx={22 + i * 13} cy="43" r="5" fill="var(--tint-mint)" stroke="var(--tulsi)" strokeWidth="2" />)}<rect x="62" y="40" width="26" height="20" rx="4" fill="var(--tint-cream)" stroke="var(--ink)" strokeWidth="2.5" /><circle cx="75" cy="50" r="5" fill="none" stroke="var(--ink)" strokeWidth="2.5" /></svg>),
+  },
+  {
+    title: "Family alerts with a deadline",
+    body: "Urgent alerts go to Ravi first. If nobody responds in 3 minutes, Neha is told, then Asha hears to call 112.",
+    example: "Ravi taps \"I'm calling her now\" and her speaker says so out loud.",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="14" y="10" width="28" height="52" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="54" y="10" width="28" height="52" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><path d="M42 30h12" stroke="var(--haldi)" strokeWidth="3" strokeLinecap="round" strokeDasharray="3 4" /><path d="M28 26c0-4 3-6 0-6s0 2 0 6zM24 32h8" stroke="var(--haldi)" strokeWidth="2.5" strokeLinecap="round" fill="var(--haldi-soft)" /><circle cx="68" cy="30" r="6" fill="var(--leaf-soft)" stroke="var(--leaf)" strokeWidth="2.5" /><path d="M65 30l2 2 4-4" stroke="var(--leaf)" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>),
+  },
+  {
+    title: "Asks before acting",
+    body: "Refills and appointment changes only happen after a clear yes, on her speaker or on the family app. The AI cannot approve them by itself.",
+    example: "\"Send a refill request for Amlodipine?\" Yes / No",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="14" y="14" width="68" height="44" rx="10" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="22" y="38" width="24" height="12" rx="6" fill="var(--tulsi)" /><rect x="50" y="38" width="24" height="12" rx="6" fill="none" stroke="var(--ink-soft)" strokeWidth="2" /><path d="M24 26h40" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" /></svg>),
+  },
+  {
+    title: "Emergency signs, never missed",
+    body: "Stroke signs, chest pain, breathing trouble or a bad fall are recognised by fixed rules on every message, even if the AI is down.",
+    example: "\"My face feels droopy\" → \"Please call 112 now\", and family is alerted.",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><path d="M48 60S16 42 16 26c0-9 7-15 15-15 7 0 12 4 17 10 5-6 10-10 17-10 8 0 15 6 15 15 0 16-32 34-32 34z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /><path d="M24 34h12l5-9 7 18 5-9h19" stroke="var(--sindoor)" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>),
+  },
+];
+
+function Features() {
+  return (
+    <section className="features" aria-labelledby="features-title">
+      <h2 id="features-title">What CareCircle does</h2>
+      <p className="features-lead">Six things it does for Asha and her family. Safety rules run as fixed code; the AI handles the conversation.</p>
+      <div className="feature-grid">
+        {FEATURES.map((f) => (
+          <article key={f.title} className="feature">
+            <div className="feature-art">{f.art}</div>
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+            <p className="feature-eg">{f.example}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

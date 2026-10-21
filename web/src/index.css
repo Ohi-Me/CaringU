@@ -3,9 +3,9 @@
    Palette named after an Indian home: linen walls, tulsi, haldi, sindoor. */
 
 :root {
-  --linen: #FAF5EC;        /* page */
+  --linen: #F7EFDF;        /* page: warm cream */
   --paper: #FFFDF8;        /* surfaces */
-  --wash: #F2EBDD;         /* quiet fills */
+  --wash: #EFE6D2;         /* quiet fills */
   --line: #E2DACB;         /* borders */
   --ink: #22302F;          /* text */
   --ink-soft: #5E6B69;     /* secondary text */
@@ -19,7 +19,7 @@
   --leaf-soft: #E1F1E6;
   --fabric-a: #C9D6C3;     /* speaker cloth: soft sage */
   --fabric-b: #BACAB3;
-  --frame: #1E3A33;        /* phone frame: deep forest green */
+  --frame: #B9CDB3;        /* phone frame: soft sage */
   /* card tints: a family of greens and creams */
   --tint-sage: #E8EFE2;
   --tint-mint: #E2F0EA;
@@ -157,7 +157,7 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
 }
 @media (prefers-color-scheme: dark) { .phone { box-shadow: var(--lift), inset 0 0 0 1px var(--line); } }
 .phone-bar { display: flex; justify-content: center; padding: 4px 0 8px; }
-.phone-notch { width: 96px; height: 6px; border-radius: 6px; background: rgba(255,255,255,.18); }
+.phone-notch { width: 96px; height: 6px; border-radius: 6px; background: rgba(34,48,47,.25); }
 .phone-screen { background: var(--linen); border-radius: 26px; padding: 16px; min-height: 70vh; }
 .tabs { display: flex; gap: 6px; margin-bottom: 14px; background: var(--wash); padding: 4px; border-radius: 14px; }
 .tabs button, .mobile-tabs button { flex: 1; background: transparent; color: var(--ink-soft); min-height: 40px; }
@@ -275,3 +275,20 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
 @media (prefers-reduced-motion: reduce) {
   .orb .ring, .alert.live { animation: none !important; }
 }
+
+/* ---------------- What CareCircle does ---------------- */
+.features { margin-top: 40px; }
+.features h2 { font-size: var(--t-xl); margin-bottom: .35rem; }
+.features-lead { color: var(--ink-soft); max-width: 62ch; margin-bottom: 18px; }
+.feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.feature { border-radius: 22px; padding: 20px 20px 18px; background: var(--tint-sage); box-shadow: inset 0 0 0 1px var(--line); display: flex; flex-direction: column; gap: 8px; }
+.feature:nth-child(3n+2) { background: var(--tint-cream); }
+.feature:nth-child(3n+3) { background: var(--tint-mint); }
+.feature-art { width: 96px; height: 72px; border-radius: 16px; background: rgba(255,255,255,.6); display: grid; place-items: center; margin-bottom: 4px; }
+@media (prefers-color-scheme: dark) { .feature-art { background: rgba(0,0,0,.2); } }
+.feature-art svg { width: 88px; height: 66px; }
+.feature h3 { font-size: var(--t-m); margin: 0; }
+.feature p { margin: 0; }
+.feature-eg { font-size: var(--t-xs); color: var(--ink-soft); border-left: 3px solid var(--tulsi); padding-left: 10px; margin-top: auto !important; }
+@media (max-width: 1000px) { .feature-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .feature-grid { grid-template-columns: 1fr; } }
