@@ -4,3 +4,5 @@ __pycache__/
 data/raw/
 data/refs/
 data/uploads/
+data/collage_crops/
+data/collage.webp

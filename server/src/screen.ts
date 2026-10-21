@@ -64,6 +64,10 @@ export function enforce(reply: string, s: ScreenOutcome) {
   // Normalise typographic characters first (models use curly apostrophes and non-breaking hyphens).
   reply = reply.replace(/[‘’]/g, "'").replace(/[‐‑‒–]/g, "-").replace(/ /g, " ");
   reply = reply.replace(/\byou (have not|haven't|did not|didn't) (taken|take|had)\b/gi, "I don't have a record of you taking");
+  reply = reply.replace(/\baccording to (your|the) records,? I don't have a record\b/gi, "I don't have a record");
+  // Never certify a dose as safe. Cautious phrasing ("ask whether it's safe to take") is left alone.
+  reply = reply.replace(/(?<!\b(whether|if|not sure|can't say|cannot say|can't confirm|cannot confirm) )\b(it'?s|it is) (now |definitely |perfectly )?(okay|ok|safe|fine) (for you )?to take\b/gi,
+    "I can only tell you what's recorded, so please check your pill organiser before you take");
   if (s.triage.triage === "urgent" && !/\b(112|911|emergency)\b/i.test(reply)) return `${EMERGENCY_LINE} ${reply}`;
   if (s.scam?.verdict === "likely_scam" && !/\b(scam|hang up|don'?t share|do not share)\b/i.test(reply)) return `This looks like a scam; don't share any code or pay anything. ${reply}`;
   return reply;

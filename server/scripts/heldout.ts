@@ -62,9 +62,15 @@ const convs = load(process.env.CONVS ?? "heldout-conversations.json").cases as C
 let mode = "offline";
 const conv: string[] = [];
 let pass = 0;
+const tokens = { input: 0, output: 0 };
 async function chat(history: { role: string; text: string }[], speaker?: string) {
   const res = await fetch(`${BASE}/api/agent/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker }) });
   const ev = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+  for (const e of ev) if (e.type === "model") {
+    // Provider-reported usage (Bedrock: inputTokens/outputTokens; Token Factory: prompt/completion_tokens).
+    tokens.input += e.usage?.inputTokens ?? e.usage?.prompt_tokens ?? 0;
+    tokens.output += e.usage?.outputTokens ?? e.usage?.completion_tokens ?? 0;
+  }
   return { tools: ev.filter((e) => e.type === "tool_call").map((e) => e.name as string), final: ev.find((e) => e.type === "final") ?? ev.find((e) => e.type === "error") ?? {} };
 }
 const reset = () => fetch(`${BASE}/api/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ time: "10:00" }) });
@@ -89,6 +95,8 @@ try {
   await fetch(`${BASE}/api/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   log("");
   log(`## 3. Held-out conversations (${mode} agent): ${pass}/${convs.length} passed`);
+  log("");
+  log(`Model tokens: ${tokens.input} input + ${tokens.output} output (provider-reported).`);
   log("");
   log("| Category | Request | Tools | Result | Reply |");
   log("|---|---|---|---|---|");

@@ -594,6 +594,7 @@ function Trace({ events }: { events: TraceEvent[] }) {
 
 function answeredLabel(by: AnsweredBy) {
   if (by.mode === "safety-screen") return "Answered by the deterministic safety screen";
+  if (by.mode === "approval") return "Your yes/no was applied directly (no model involved)";
   if (by.mode === "bedrock") return `Answered by Amazon Bedrock (${by.model})`;
   if (by.mode === "bedrock-partial") return `Bedrock failed part-way (${by.fallback?.reason}); no retry, to avoid duplicate actions`;
   if (by.fallback) return `Rule-based fallback: Bedrock unavailable (${by.fallback.reason})`;

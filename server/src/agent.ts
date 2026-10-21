@@ -31,6 +31,8 @@ Rules:
 - NEVER tell anyone a dose is safe to take. Say what is recorded and when it is scheduled. If they are unsure whether they took it, tell them to check their pill organiser or ask their pharmacist. For a missed dose, never advise taking it late: say the pharmacist or doctor should decide.
 - Whenever the user says they took a medicine (now, earlier, "this morning at 9"), ALWAYS call record_dose (pass taken_at "HH:MM" if they say when). Never answer such a statement with check_dose_status alone, and never tell them a dose is "due now" after they say they took it. If record_dose returns status=possible_duplicate, ask its question_for_user. Only if they then say they took ANOTHER one, call record_dose with extra_dose_confirmed=true and read its guidance_for_user.
 - If they forgot or missed a dose, do not ask which medicine first: tell them not to take two doses together to catch up, that their pharmacist or doctor should decide about a late dose, and offer to message the family.
+- If they ask for a refill (or whether they are running low) without naming a medicine, call forecast_refills (no horizon_days; the default is 7 days) and offer only the medicines whose status is REFILL NEEDED; only ask "which one?" if none is.
+- Only say you did something (requested, sent, recorded, booked, cancelled, messaged) if a tool call in THIS turn succeeded and did it.
 - A medicine is "running low" ONLY if forecast_refills returns needs_refill=true for it. For each such medicine, call request_refill (it asks the person for approval). Do not call medicines with more than a week's supply low.
 - request_refill, schedule_appointment and cancel_appointment ask the person for approval themselves when possible. Report the returned status truthfully (done / cancelled / awaiting_confirmation). If the status is awaiting_confirmation, read the summary and ask "Shall I go ahead?"; call confirm_action only after an explicit yes in the user's latest message.
 - Never claim something was done unless a tool result says so.
@@ -41,7 +43,8 @@ Rules:
 - For appointments call list_appointments without a "days" limit (the default covers two weeks), then match the one they mean (e.g. "heart doctor" = cardiology).
 - Caregivers (Ravi, Neha) may ask for a summary (get_family_digest) or respond to alerts (respond_to_alert).
 - Use real ids from tool results only. If a request is ambiguous (e.g. which medicine), ask one short question.
-- Replies are spoken aloud: 1-3 short sentences, plain words, no markdown, no lists, no ids.`;
+- Replies are spoken aloud: 1-3 short sentences, plain words, no markdown, no lists, no ids.
+- Always reply in simple English, even if the user mixes in Hindi words (understand them, answer in English). You are the assistant, never the patient: do not describe symptoms as your own.`;
 }
 
 // Human answers to MCP elicitation requests, keyed by a one-time id sent to the browser.
@@ -189,6 +192,9 @@ const EXTRA = /\b(another|again|extra|second|one more|twice|two)\b/i;
  * cannot approve a pending action or record an extra dose unless the user's
  * latest message actually says so. Caregivers approve from the dashboard.
  */
+// "I've requested / sent / recorded …" style claims that must be backed by a real tool call.
+const ACTION_CLAIM = /\bI(?:'ve| have)? (?:just |already |now )?(?:requested|sent|recorded|logged|booked|scheduled|cancell?ed|messaged|notified|ordered|prepared|confirmed)\b/i;
+
 // Tools that act on behalf of a caregiver; the older adult's own turns must not use them.
 const CAREGIVER_ONLY = new Set(["send_message_to_elder", "respond_to_alert", "acknowledge_alert"]);
 
@@ -197,6 +203,14 @@ function guarded(call: CallTool, lastUser: string, emit: Emit, speaker = "Asha (
     let reason: string | null = null;
     if (CAREGIVER_ONLY.has(name) && /^asha/i.test(speaker))
       reason = `${name} is for caregivers. To contact Ravi or Neha for Asha, use notify_family.`;
+    if (name === "request_refill" && !reason) {
+      // Only refill what the forecast says is running low, unless the user named that medicine themselves.
+      const f = await call("forecast_refills", {});
+      const med = String(args.medication ?? "").toLowerCase();
+      const row = (f?.data ?? []).find((m: any) => m.medication.toLowerCase() === med || m.medication_id === med || med.includes(m.medication.toLowerCase()));
+      if (row && !row.needs_refill && !new RegExp(`\\b${row.medication}\\b`, "i").test(lastUser))
+        reason = `${row.medication} is ${row.status}. Only request refills for medicines marked REFILL NEEDED, or ones the user named.`;
+    }
     if (name === "confirm_action" && args.approve === true && !AFFIRM.test(lastUser))
       reason = "The user's latest message is not an explicit yes. Read the summary and ask them first.";
     if (name === "record_dose" && args.extra_dose_confirmed === true && !EXTRA.test(lastUser))
@@ -248,6 +262,32 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
         screen.notes.push(`The user attached a photo of a medicine strip (photo_id=${photoId}). Call inspect_medicine_strip with it and explain the verdict in plain words.`);
       }
       const provider = activeProvider();
+      // Count successful state-changing tool calls this turn (for the action-claim check).
+      const readOnlyTools = new Set(mcp.tools.filter((t: any) => t.annotations?.readOnlyHint).map((t: any) => t.name));
+      let writesThisTurn = 0;
+      const trackedCall: CallTool = async (n, a) => {
+        const r = await mcp!.call(n, a);
+        if (!readOnlyTools.has(n) && r?.ok !== false) writesThisTurn++;
+        return r;
+      };
+      // Models only see earlier turns as text, so on a yes/no answer tell them which approvals
+      // are actually waiting (real ids from the server) instead of letting them guess.
+      let directReply: string | null = null;
+      const saysNo = /^\s*(no|nope|not now|cancel|don'?t|nahi)\b/i.test(lastUser);
+      if (provider !== "rules" && (AFFIRM.test(lastUser) || saysNo)) {
+        const ov = await mcp.call("get_care_overview", {});
+        const pending = ov?.data?.pending_confirmations ?? [];
+        const prevAssistant = [...history].slice(0, -1).reverse().find((t) => t.role === "assistant")?.text ?? "";
+        if (pending.length === 1 && lastUser.trim().split(/\s+/).length <= 5 && /\b(shall i|should i|go ahead|confirm)\b/i.test(prevAssistant)) {
+          // A plain yes/no to the one action just proposed: apply the human's answer directly.
+          // Approval never depends on a language model following instructions.
+          const p = pending[0];
+          const r = await trackedCall("confirm_action", { confirmation_id: p.confirmation_id, approve: !saysNo, confirmed_by: speaker });
+          directReply = !r?.ok ? `I couldn't complete that: ${r?.error?.message ?? "unknown error"}. Nothing else was changed.`
+            : saysNo ? "Okay, I've cancelled that. Nothing was sent." : `Done. ${String(p.summary).replace(/\.$/, "")}.`;
+        } else if (pending.length)
+          screen.notes.push(`Actions waiting for the user's answer: ${pending.map((p: any) => `confirmation_id=${p.confirmation_id} (${p.summary})`).join("; ")}. Use these exact ids with confirm_action.`);
+      }
       let text: string, mode: string = provider;
       let usedModel: string | null = null;
       let fallback: { from: string; reason: string } | null = null;
@@ -255,9 +295,12 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       if (screen.terminalReply) {
         text = screen.terminalReply;
         mode = "safety-screen";
+      } else if (directReply) {
+        text = directReply;
+        mode = "approval";
       } else if (provider !== "rules") {
         try {
-          const guardedCall = guarded(mcp.call, lastUser, emit, speaker);
+          const guardedCall = guarded(trackedCall, lastUser, emit, speaker);
           if (provider === "nebius") {
             const out = await nemotronAgent(history, speaker, mcp.tools, guardedCall, emit, systemPrompt(clock(), speaker), screen);
             text = enforce(out.text, screen);
@@ -290,6 +333,11 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       else if (screen.wellbeingLogged && mode !== "safety-screen" && !/family|ravi|neha/i.test(text))
         text = `I've noted how you're feeling and let your family know. ${text}`;
       const total_ms = Math.round(performance.now() - t0);
+      // Action-claim check: a model reply must not claim an action that no tool performed this turn.
+      if ((mode === "bedrock" || mode === "nebius") && writesThisTurn === 0 && !screen.wellbeingLogged && !screen.scamChecked && ACTION_CLAIM.test(text)) {
+        emit({ type: "guard", name: "reply", args: {}, reason: "The reply claimed an action that no tool performed this turn; replaced with an honest answer." });
+        text = "Sorry, I haven't actually done that yet. Nothing has been sent or changed. Would you like me to do it now?";
+      }
       const model = usedModel ?? (mode === "bedrock-partial" ? MODEL_ID : null);
       // One log line per request: who answered, and why if it was a fallback. No prompts or credentials.
       console.log(`[agent] answered_by=${mode}${model ? ` model=${model}` : ""}${fallback ? ` fallback_from=${fallback.from} reason="${fallback.reason}"` : ""} ms=${total_ms}`);

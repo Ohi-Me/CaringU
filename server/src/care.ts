@@ -226,6 +226,7 @@ export function forecastRefills(db: DB, now: Date, horizonDays = 7) {
       days_of_supply: Math.floor(days),
       runs_out_on: Number.isFinite(days) ? ymd(new Date(now.getTime() + days * 24 * HOUR)) : null,
       needs_refill: days <= horizonDays,
+      status: days <= horizonDays ? `REFILL NEEDED (${Math.floor(days)} days left)` : `ok (${Math.floor(days)} days left, no refill needed)`,
       refill_requested_at: requested ? localStamp(requested.at) : null,
     };
   }).sort((a, b) => a.days_of_supply - b.days_of_supply);

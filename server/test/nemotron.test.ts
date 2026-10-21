@@ -32,6 +32,8 @@ before(async () => {
       if (last.role === "user") return res.json(toolCall("notify_family", JSON.stringify({ message: "Asha asked for a call", severity: "info" })));
       return res.status(500).json({ error: "upstream exploded" });
     }
+    if (/CLAIM_WITHOUT_ACTION/.test(firstUser)) return res.json(answer("I've requested your refill and sent it to the pharmacy."));
+    if (/REFILL_GUARD/.test(firstUser) && last.role === "user") return res.json(toolCall("request_refill", JSON.stringify({ medication: "Atorvastatin" })));
     if (last.role === "tool") return res.json(answer(`<think>check the record first</think>Done, based on the tool result: ${String(last.content).slice(0, 40)}`));
     if (/BAD_JSON/.test(firstUser)) return res.json(toolCall("list_medications", "{not json"));
     if (/BP pill/i.test(firstUser)) return res.json(toolCall("check_dose_status", JSON.stringify({ medication: "bp" })));
@@ -116,4 +118,19 @@ test("safety screen still owns emergencies under Nemotron", async () => {
   assert.equal(r.final.mode, "safety-screen");
   assert.match(r.final.text, /112/);
   assert.equal(calls.length, 0, "no model call needed for a red-flag emergency");
+});
+
+test("action-claim check: a reply claiming an action no tool performed is replaced", async () => {
+  const r = await chat(OK_PORT, "CLAIM_WITHOUT_ACTION please");
+  assert.ok(r.ev.some((e) => e.type === "guard" && e.name === "reply"));
+  assert.match(r.final.text, /haven't actually done that/);
+});
+
+test("refill guard: no refill for a medicine with plenty of supply unless the user named it", async () => {
+  await fetch(`http://127.0.0.1:${OK_PORT}/api/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ time: "10:00" }) });
+  const r = await chat(OK_PORT, "REFILL_GUARD I need a refill");
+  const g = r.ev.find((e) => e.type === "guard" && e.name === "request_refill");
+  assert.ok(g, "guard must block");
+  assert.match(g.reason, /Atorvastatin is ok/);
+  assert.ok(!r.ev.some((e) => e.type === "tool_result" && e.name === "request_refill"), "request_refill must not execute");
 });
