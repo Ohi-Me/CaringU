@@ -1,4 +1,22 @@
-# Photo guide: medicine strips for the CaringU strip check
+# Photo guide: real photos for the CaringU camera checks
+
+## 1. Scam Lens (start here: about 15 minutes, 24 photos)
+
+This set gives the OpenCV entry real-camera numbers for Scam Lens.
+
+1. Open the three sample codes on your laptop screen, one at a time:
+   `web/public/samples/prize-flyer.jpg`, `kyc-message.jpg` and `pharmacy-bill.jpg`.
+   You can also print them; paper and screen both count.
+2. With your phone camera, take **8 photos of each**, changing one thing each time:
+   close / arm's length / across the room, straight / tilted, room light / dim light, and one with glare from a lamp or window.
+3. Name them by which sample is in the photo, then a number:
+   `prize_1.jpg` … `prize_8.jpg`, `kyc_1.jpg` … `kyc_8.jpg`, `pharmacy_1.jpg` … `pharmacy_8.jpg`.
+   Optional: 2–3 photos with **no code** in them, named `nocode_1.jpg` etc. (checks that nothing is "read" by mistake).
+4. Put them in `vision/data/lens_real/` and tell me. The evaluation labels them from the names automatically.
+
+Don't photograph your own UPI or bank QR codes. They contain your personal payment ID.
+
+## 2. Medicine strips (strip check)
 
 These photos are the evaluation dataset for the OpenCV competition. They're what proves the vision works on real strips, so follow the naming carefully. About **45–60 photos** total. The phone camera is fine.
 

@@ -1,8 +1,8 @@
 # CaringU
 
-**Ask before you act.** CaringU is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a fall) and brings the family in, fast.
+**Ask before you act.** CaringU is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a QR code that "pays you a refund", a fall) and brings the family (her *care circle*) in, fast.
 
-Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ track: a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) plus a simulated Alexa+-style experience whose web clients are real MCP clients.
+One product, entered in four contests (see [docs/WIN-PLAN.md](docs/WIN-PLAN.md)): the *Amazon Developer Hackathon* (Alexa+ track), the *OpenCV AI Competition 2026*, the *Nebius x NVIDIA Global AI Hackathon* and the *PayPal AI Hackathon*. At its core is a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) plus an Alexa+-style experience whose web clients are real MCP clients.
 
 ## The problem
 
@@ -22,6 +22,16 @@ Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ trac
 | "My face feels strange and my words are coming out wrong" | Stroke signs are caught deterministically: `log_wellbeing` sends an urgent alert, and the reply starts with **"Please call 112 now."** |
 | "I'm running low on my BP pills" | `request_refill`: the **MCP server asks her directly** ("Send a refill request for 30 × Amlodipine…?"), by voice or with Yes/No buttons. The refill runs only if she says yes. |
 | Ravi: "Any problems with mom today?" | `get_family_digest`: doses taken and missed, alerts, refills, appointments, and whether a ride is arranged. |
+
+### Scam Lens: the camera answers "is this code safe?"
+
+Scammers now send QR codes that supposedly *give* money ("scan to receive your ₹5,000 cashback"). Scanning a payment code always *sends* money.
+1. Asha shows the camera the code ("Check a QR code or payment request", or one of the three samples in the demo).
+2. **OpenCV 5** ([`lens.py`](vision/carecircle_vision/lens.py)) finds and decodes it: `QRCodeDetector` and `QRCodeDetectorAruco` over a short ladder of views (raw, CLAHE-equalised, upscaled, unsharp-masked, adaptive-threshold), stopping at the first view that decodes. It also measures blur and brightness, so an unreadable photo gets "hold it closer and steadier", never a guess.
+3. **Fixed rules** ([`lens.ts`](server/src/lens.ts)) decide what the code means. A UPI or PayPal payment code presented as a prize, refund or KYC is a scam; look-alike bank links, app downloads and crypto requests are scams; shortened, insecure or odd-domain links are suspicious.
+4. The verdict decides what happens next. A scam raises an **urgent family alert** and **blocks the payee**; a suspicious link warns the family; a normal bill only reminds her that paying sends money. No language model is involved in the verdict.
+
+On 640 generated photos with controlled distance, blur, tilt, lighting and JPEG damage, the plain OpenCV call read **89.7%** of codes and the ladder read **99.5%**, with **no wrong reads**, at a median 44 ms per photo. Generated photos measure robustness, not real-world accuracy; real phone photos are reported separately. Full results: [docs/lens-eval.md](docs/lens-eval.md).
 
 ### Strip check: the camera answers "did I take it?"
 
@@ -66,7 +76,7 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 
 | | Status |
 |---|---|
-| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 23 tools. |
+| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 24 tools. |
 | Vision | **Real.** OpenCV 5.0.0 service (Python, FastAPI), called by the MCP server. Unit and end-to-end tests use synthetic strips; real-photo accuracy is in [docs/vision-eval.md](docs/vision-eval.md). |
 | MCP clients | **Real.** (1) The agent (server side) runs `initialize`, `tools/list` and `tools/call`, and handles elicitation by relaying questions to the device. (2) The family dashboard is an MCP client in the browser with its own elicitation handler. |
 | State | **Real.** SQLite (Node's built-in `node:sqlite`). Changes persist and are verified by re-reading. |
@@ -93,7 +103,7 @@ flowchart LR
   end
 ```
 
-### MCP tools (23)
+### MCP tools (24)
 
 | Area | Tools |
 |---|---|
@@ -101,7 +111,7 @@ flowchart LR
 | Appointments | `list_appointments`, `schedule_appointment`†, `cancel_appointment`† |
 | Approvals | `confirm_action` (fallback for clients without elicitation) |
 | Safety | `log_wellbeing`, `assess_scam_risk` |
-| Strip check (camera) | `inspect_medicine_strip`‡, `register_medicine_strip`, `list_strip_checks` |
+| Camera | `check_code_with_camera` (Scam Lens), `inspect_medicine_strip`‡, `register_medicine_strip`, `list_strip_checks` |
 | Family loop | `notify_family`, `list_alerts`, `acknowledge_alert`, `respond_to_alert`, `send_message_to_elder`, `get_announcements`, `mark_announcements_heard`, `get_family_digest` |
 
 † Approved by a human through MCP elicitation, or through `confirm_action` for clients that can't elicit.
@@ -116,7 +126,7 @@ cd web && npm install && npm run build && cd ..
 cd server && npm install && npm start
 ```
 
-Strip check (optional, needs Python 3.11+), in a second terminal:
+Camera checks (Scam Lens and strip check; optional, needs Python 3.11+), in a second terminal:
 
 ```bash
 cd vision && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # macOS/Linux: .venv/bin/pip
@@ -124,8 +134,9 @@ cd ../server && npm run vision     # OpenCV service on :8790
 ```
 
 Open http://localhost:8787.
-- **Reset demo (10:00)** starts a reproducible morning: one dose due, low Amlodipine stock, and a cardiology appointment tomorrow with no ride arranged.
-- **+3 min** moves the demo clock forward so you can watch an alert escalate.
+Open **Try it**. Under **Demo controls**:
+- **Restart the day at 10:00** starts a reproducible morning: one dose due, low Amlodipine stock, and a cardiology appointment tomorrow with no ride arranged.
+- **+3 minutes** moves the demo clock forward so you can watch an alert escalate; **+1 hour** passes the 11:00 check-in.
 
 ### Use Amazon Bedrock
 
@@ -133,7 +144,7 @@ Open http://localhost:8787.
 2. Configure that identity as a profile, for example `aws configure --profile carecircle-dev`.
 3. Copy `.env.example` to `.env` and set `AWS_PROFILE=carecircle-dev` and `AGENT_MODE=bedrock`.
 
-The header badge shows which agent is active.
+**How it's built** shows which agent is answering right now.
 
 ### Connect any MCP client
 
@@ -149,11 +160,12 @@ Use the returned `Mcp-Session-Id` header on later requests. Declare `"capabiliti
 
 ```bash
 cd server
-npm test          # 36 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
-                  #           Bedrock-fallback regressions, end-to-end strip check (Node -> OpenCV service)
+npm test          # 50 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
+                  #           model-fallback regressions, Scam Lens rules, end-to-end strip check and Scam Lens (Node -> OpenCV)
 npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (server running)
 npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)
-cd ../vision && .venv/Scripts/python -m pytest      # 13 vision tests (synthetic strips)
+cd ../vision && .venv/Scripts/python -m pytest      # 17 vision tests (generated strips and QR codes)
+python scripts/eval_lens.py 640 > ../docs/lens-eval.md               # Scam Lens: baseline vs view ladder, plus real photos if present
 python scripts/eval_real.py data/raw --out ../docs/vision-eval.md   # real photos (see docs/PHOTO-GUIDE.md)
 ```
 
