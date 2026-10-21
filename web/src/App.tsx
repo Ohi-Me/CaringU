@@ -906,9 +906,11 @@ const JUDGES: { id: string; name: string; tryIt: string[]; uses: string[]; measu
     tryIt: [
       "Set AGENT_MODE=nebius and NEBIUS_API_KEY in .env, then npm start in server/. The same app now runs on Nemotron.",
       "On Ravi's phone, find This week and tap Write it up with AI. Nemotron 3 Ultra writes the weekly update from the record, and a grounding check rejects it if it states any number that isn't there.",
+      "In Nebius mode, tap the \"You won ₹5,000\" flyer sample: the trace shows the words Nemotron VL read next to what OpenCV decoded.",
       "Run npm run eval in server/ to repeat the scripted evaluation against Nemotron.",
     ],
     uses: ["Model routing: NVIDIA Nemotron 3 Super for everyday conversation with tool calling; Nemotron 3 Ultra only for the weekly review, the one task that reasons over a week of records",
+      "Nemotron 3.5 Super VL in Scam Lens: it reads the printed words around a QR code (\"You won… scan to RECEIVE\"), and the fixed rules use those words as evidence. The model never gives the verdict",
       "Nebius Token Factory (OpenAI-compatible API); token use and time are shown with each written review",
       "The same guards as Bedrock: fixed safety screen, dose check, refill guard and the action-claim check; plus the grounding check on the weekly review"],
     measured: "Nemotron passed 29 of 32 scripted cases, 21 of 24 held-out conversations and 14 of 15 scenarios.",
@@ -983,7 +985,7 @@ function About({ events }: { events: TraceEvent[] }) {
             {EVALS.map((e) => <tr key={e.set}><th scope="row">{e.set}</th><td>{e.bedrock} of {e.n}</td><td>{e.nemotron} of {e.n}</td></tr>)}
           </tbody>
         </table>
-        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 54 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in the OpenCV tab above.</p>
+        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 57 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in the OpenCV tab above.</p>
       </section>
 
       <section id="trace" aria-labelledby="trace-title">

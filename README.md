@@ -160,7 +160,7 @@ Use the returned `Mcp-Session-Id` header on later requests. Declare `"capabiliti
 
 ```bash
 cd server
-npm test          # 54 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
+npm test          # 57 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
                   #           model-fallback regressions, Scam Lens rules, end-to-end strip check and Scam Lens (Node -> OpenCV)
 npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (server running)
 npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)

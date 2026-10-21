@@ -8,6 +8,8 @@ import { join } from "node:path";
 import type { DB } from "./db.js";
 import { raiseAlert } from "./care.js";
 import { callVision, PHOTO_DIR, readPhoto } from "./vision.js";
+import { NEBIUS, nebiusVisionEnabled, nemotronReadText } from "./nemotron.js";
+import { screenScam } from "./safety.js";
 
 type Row = Record<string, any>;
 export type Verdict = "scam" | "suspicious" | "payment" | "link" | "text";
@@ -105,13 +107,44 @@ export function spokenFor(f: CodeFinding, text: string): string {
 }
 
 export async function checkCode(db: DB, now: Date, photoId: string, context = "") {
+  const bytes = readPhoto(photoId);
   const form = new FormData();
-  form.append("image", new Blob([readPhoto(photoId)]), "photo.jpg");
+  form.append("image", new Blob([bytes]), "photo.jpg");
   const v = await callVision("/scan", form);
   if (v.annotated_jpeg_b64) writeFileSync(join(PHOTO_DIR, `${photoId}_annotated.jpg`), Buffer.from(v.annotated_jpeg_b64, "base64"));
+  // Nebius mode: NVIDIA Nemotron VL reads the words around the code ("You won… scan to RECEIVE").
+  // The words are evidence for the same fixed rules; the model never gives the verdict.
+  let printed = "";
+  let reader: Row | null = null;
+  if (nebiusVisionEnabled()) {
+    const t0 = performance.now();
+    try {
+      const r = await nemotronReadText(bytes);
+      printed = r.text;
+      reader = { model: NEBIUS.vision, ms: Math.round(performance.now() - t0), usage: r.usage, text: printed };
+    } catch (e: any) {
+      reader = { model: NEBIUS.vision, error: String(e?.message ?? e).slice(0, 120) };
+    }
+  }
+  context = [context, printed].filter(Boolean).join(" ");
   const evidence = { annotated_image: v.annotated_jpeg_b64 ? `/api/vision/photo/${photoId}/annotated` : null, opencv: v.opencv,
-    decoded_by: v.method, views_tried: v.attempts, ms: v.ms, photo_quality: v.quality };
+    decoded_by: v.method, views_tried: v.attempts, ms: v.ms, photo_quality: v.quality, words_read: reader };
   const codes = (v.codes ?? []) as { text: string }[];
+  if (!codes.length && printed) {
+    // No code, but the words themselves can be a scam message (KYC, blocked account, prize).
+    const s = screenScam(printed);
+    if (s.verdict !== "no_strong_signals") {
+      const scam = s.verdict === "likely_scam";
+      const alert = raiseAlert(db, now, scam ? "urgent" : "warning", "scam_code",
+        `Scam Lens: she showed a message that reads like a scam (${s.signals.join(", ")}). Please call her.`);
+      const checkId = `lc_${randomUUID().slice(0, 8)}`;
+      db.prepare("INSERT INTO lens_checks (id, at, photo_id, verdict, summary, payee) VALUES (?,?,?,?,?,?)")
+        .run(checkId, now.toISOString(), photoId, scam ? "scam" : "suspicious", `message: ${s.signals.join(", ")}`, null);
+      return { check_id: checkId, verdict: scam ? "scam" : "suspicious", codes: [], message_signals: s.signals,
+        spoken: `I can't see a code, but this message ${scam ? "reads like a scam" : "looks suspicious"}: ${s.signals.join(", ").replace(/_/g, " ")}. Don't reply, pay, or call any number in it. I've let your family know.`,
+        family_alerted: true, notified: alert.notified, evidence };
+    }
+  }
   if (!codes.length) {
     const hint = v.quality?.issues?.length ? ` The photo looks ${v.quality.issues.join(" and ")}.` : "";
     const spoken = v.found_unreadable

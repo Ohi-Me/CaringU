@@ -80,6 +80,20 @@ export async function nemotronComplete(model: string, system: string, user: stri
   return { text: stripThinking(out.choices?.[0]?.message?.content ?? ""), usage: out.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined };
 }
 
+/** Scam Lens in Nebius mode: Nemotron VL reads the words around a code. Off with NEBIUS_VISION=off. */
+export const nebiusVisionEnabled = () => nebiusConfigured() && process.env.NEBIUS_VISION !== "off";
+
+/** Nemotron VL transcribes the printed or on-screen words in a photo; fixed rules decide what they mean. */
+export async function nemotronReadText(image: Buffer) {
+  const mime = image[0] === 0x89 ? "image/png" : "image/jpeg";
+  const out = await post("/chat/completions", { model: NEBIUS.vision, temperature: 0, max_tokens: 220, messages: [{ role: "user", content: [
+    { type: "text", text: "Transcribe the printed or on-screen words in this photo exactly, in reading order. Ignore the QR code itself. Reply with the words only, or NONE if there are no words." },
+    { type: "image_url", image_url: { url: `data:${mime};base64,${image.toString("base64")}` } },
+  ] }] }, 60_000);
+  const text = stripThinking(out.choices?.[0]?.message?.content ?? "").trim();
+  return { text: /^none\.?$/i.test(text) ? "" : text.slice(0, 600), usage: out.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined };
+}
+
 /**
  * Tool-calling loop. Tracks state-changing tool calls; if the provider fails after one,
  * the error carries `writes` so the caller won't let a fallback planner repeat them.
