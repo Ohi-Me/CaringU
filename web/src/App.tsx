@@ -636,13 +636,13 @@ function Family({ tick }: { tick: number }) {
           value={d.checkin?.checked_in ? d.checkin.first_at : "—"} tone={!d.checkin?.checked_in && d.checkin?.nudged ? "warn" : undefined} />
       </div>
 
-      <MomentCard me={me} />
-
-      <StripCard busyKey={busy} setBusyKey={setBusy} />
-
-      <PaymentsCard me={me} tick={tick} />
-
-      <WeekCard tick={tick} />
+      {/* Most urgent first: alerts and anything waiting for a decision, then today, then the rest. */}
+      <div className="card">
+        <h2>Alerts</h2>
+        {d.open_alerts.length === 0 ? <p className="muted">All clear.</p> : d.open_alerts.map((a: any) => (
+          <AlertCard key={a.id} a={a} me={me} busy={busy === a.id} act={act} />
+        ))}
+      </div>
 
       {ov.pending_confirmations.length > 0 && (
         <div className="card">
@@ -659,19 +659,7 @@ function Family({ tick }: { tick: number }) {
         </div>
       )}
 
-      <div className="card">
-        <h2>Alerts</h2>
-        {d.open_alerts.length === 0 ? <p className="muted">All clear.</p> : d.open_alerts.map((a: any) => (
-          <AlertCard key={a.id} a={a} me={me} busy={busy === a.id} act={act} />
-        ))}
-      </div>
-
-      {d.messages_to_her?.length > 0 && (
-        <div className="card">
-          <h2>Said to her device</h2>
-          {d.messages_to_her.map((m: any, i: number) => <p key={i} className="small"><b>{m.at}</b> {m.text} <span className="muted">{m.heard ? "· spoken" : "· waiting"}</span></p>)}
-        </div>
-      )}
+      <PaymentsCard me={me} tick={tick} />
 
       <div className="card">
         <h2>Today's medicines</h2>
@@ -707,12 +695,25 @@ function Family({ tick }: { tick: number }) {
         </div>
       </div>
 
+      <MomentCard me={me} />
+
+      <WeekCard tick={tick} />
+
+      {d.messages_to_her?.length > 0 && (
+        <div className="card">
+          <h2>Said to her device</h2>
+          {d.messages_to_her.map((m: any, i: number) => <p key={i} className="small"><b>{m.at}</b> {m.text} <span className="muted">{m.heard ? "· spoken" : "· waiting"}</span></p>)}
+        </div>
+      )}
+
       {d.wellbeing.length > 0 && (
         <div className="card">
           <h2>How she's feeling today</h2>
           {d.wellbeing.map((w: any, i: number) => <p key={i} className={w.red_flag ? "urgent-text" : ""}>{w.at.split(" ")[1]} — “{w.symptoms}”{w.mood ? ` (${w.mood})` : ""}</p>)}
         </div>
       )}
+      <StripCard busyKey={busy} setBusyKey={setBusy} />
+
     </div>
   );
 }

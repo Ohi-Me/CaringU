@@ -27,6 +27,24 @@ syncKnownPeople(db);
 const app = express();
 app.use(express.json({ limit: "256kb" }));
 
+// The public demo calls paid models: a simple per-visitor limit keeps costs bounded.
+// Behind Caddy the visitor's address comes from X-Forwarded-For (trusted only from loopback).
+app.set("trust proxy", "loopback");
+const RATE = { windowMs: 10 * 60_000, max: Number(process.env.RATE_LIMIT_PER_10_MIN ?? 40) };
+const hits = new Map<string, number[]>();
+const rateLimit: express.RequestHandler = (req, res, next) => {
+  const key = req.ip ?? "unknown", now = Date.now();
+  if (/^(127.0.0.1|::1|::ffff:127.0.0.1)$/.test(key)) return next(); // local runs and evals; visitors via Caddy carry their own address
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < RATE.windowMs);
+  if (recent.length >= RATE.max) return res.status(429).json({ ok: false, error: "Too many requests from this device; please try again in a few minutes." });
+  recent.push(now); hits.set(key, recent);
+  next();
+};
+setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (v.every((t) => now - t >= RATE.windowMs)) hits.delete(k); }, 60_000).unref();
+app.post("/api/agent/chat", rateLimit);
+app.post("/api/vision/photo", rateLimit);
+app.post("/api/pay/link", rateLimit);
+
 // ---- MCP endpoint: Streamable HTTP with sessions ----
 // Sessions let the server send requests back to the client in the middle of a
 // tool call (elicitation: "Approve this refill?") and route the answer, which
