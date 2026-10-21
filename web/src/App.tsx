@@ -207,16 +207,19 @@ export default function App() {
     <div className="app">
       <header className="top">
         <div className="brand">
-          <span className="logo" aria-hidden>◎</span>
+          <svg className="logo" viewBox="0 0 40 40" aria-hidden>
+            <circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" strokeWidth="5" />
+            <circle cx="20" cy="20" r="5.5" fill="currentColor" />
+          </svg>
           <div>
             <h1>CareCircle</h1>
-            <p className="sub"><b>Ask before you act.</b> Voice-first care companion · independent Alexa+-style simulation · sample data</p>
+            <p className="sub">Ask before you act. A voice companion for Asha, and a window for her family.</p>
           </div>
         </div>
         <div className="top-actions">
-          <span className={`pill ${mode?.effective === "bedrock" ? "pill-good" : mode?.configured === "bedrock" ? "pill-warn" : "pill-muted"}`}
+          <span className={`pill ${mode?.effective === "bedrock" || mode?.effective === "nebius" ? "pill-good" : mode?.configured !== "rules" ? "pill-warn" : "pill-muted"}`}
             title={mode?.credentials && !mode.credentials.ok ? `Bedrock configured but credentials failed: ${mode.credentials.error}` : mode?.model ?? "Deterministic rule-based planner"}>
-            {!mode ? "Agent offline" : mode.effective === "bedrock" ? "Amazon Bedrock · Nova Pro" : mode.configured === "bedrock" ? "Bedrock credentials failed → rule fallback" : "Rule-based agent"}
+            {!mode ? "Agent offline" : mode.effective === "bedrock" ? "Amazon Bedrock, Nova Pro" : mode.effective === "nebius" ? "NVIDIA Nemotron on Nebius" : mode.configured !== "rules" ? "Model unavailable, using rules" : "Rule-based agent"}
           </span>
           <span className="pill pill-muted">MCP 2025-11-25 · Streamable HTTP</span>
           {clock && <span className={`pill ${clock.simulated ? "pill-warn" : "pill-muted"}`} title={clock.now}>{clock.simulated ? "Demo time " : "Time "}{new Date(clock.now).toTimeString().slice(0, 5)}</span>}
@@ -234,7 +237,7 @@ export default function App() {
 
       <main className="grid">
         <section className={`echo card device ${mobilePane === "echo" ? "" : "hide-mobile"}`} aria-label="Asha's CareCircle device">
-          <div className="device-label"><span className="dot" aria-hidden /> Asha's CareCircle <span className="muted">· kitchen</span></div>
+          <div className="device-label"><span className="dot" aria-hidden /> Asha's kitchen speaker</div>
           <div className="speaker-row">
             <label>Speaking as{" "}
               <select value={speaker} onChange={(e) => setSpeaker(e.target.value)}>
@@ -287,12 +290,17 @@ export default function App() {
           )}
         </section>
 
-        <section className={`side ${mobilePane === "side" ? "" : "hide-mobile"}`}>
-          <div className="tabs desktop-only" role="tablist">
-            <button role="tab" aria-selected={tab === "family"} onClick={() => setTab("family")}>Family (Ravi / Neha)</button>
-            <button role="tab" aria-selected={tab === "trace"} onClick={() => setTab("trace")}>MCP trace {events.length ? `(${events.length})` : ""}</button>
+        <section className={`side ${mobilePane === "side" ? "" : "hide-mobile"}`} aria-label="Family app on Ravi's phone">
+          <div className="phone">
+            <div className="phone-bar" aria-hidden><span className="phone-notch" /></div>
+            <div className="phone-screen">
+              <div className="tabs desktop-only" role="tablist">
+                <button role="tab" aria-selected={tab === "family"} onClick={() => setTab("family")}>Family</button>
+                <button role="tab" aria-selected={tab === "trace"} onClick={() => setTab("trace")}>What happened {events.length ? `(${events.length})` : ""}</button>
+              </div>
+              {tab === "family" ? <Family tick={tick} /> : <Trace events={events} />}
+            </div>
           </div>
-          {tab === "family" ? <Family tick={tick} /> : <Trace events={events} />}
         </section>
       </main>
       <footer className="foot">
@@ -595,6 +603,7 @@ function Trace({ events }: { events: TraceEvent[] }) {
 function answeredLabel(by: AnsweredBy) {
   if (by.mode === "safety-screen") return "Answered by the deterministic safety screen";
   if (by.mode === "approval") return "Your yes/no was applied directly (no model involved)";
+  if (by.mode === "dose-check") return "Handled by the deterministic dose check (no model involved)";
   if (by.mode === "bedrock") return `Answered by Amazon Bedrock (${by.model})`;
   if (by.mode === "bedrock-partial") return `Bedrock failed part-way (${by.fallback?.reason}); no retry, to avoid duplicate actions`;
   if (by.fallback) return `Rule-based fallback: Bedrock unavailable (${by.fallback.reason})`;

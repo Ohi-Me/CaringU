@@ -249,6 +249,21 @@ function outcome(d: any, askText: string) {
 }
 // A known medicine word, or the unknown word after "my" (so "aspirin" reaches the
 // server and comes back as MEDICATION_NOT_FOUND instead of being silently ignored).
+/**
+ * "I took / just had my X (at 9)" -> which medicine and when; null for questions and non-reports.
+ * Used by the orchestrator so every dose report goes through record_dose, whatever model answers.
+ */
+export function doseReport(text: string, now: Date): { med: string; taken_at: string | null } | null {
+  const lower = text.toLowerCase().trim();
+  if (/\?\s*$/.test(lower) || /^(did|have|has|should|can|could|may|shall|is|was)\b/.test(lower)) return null;
+  const mentionsMedicine = MED_WORDS.test(lower) || /\b(pills?|tablets?|medicines?|meds?|dose|capsules?|goli|dawai|dawa)\b/.test(lower);
+  const report = /\b(i (just |already )?(took|take)|i'?ve (just |already )?taken|i have (just |already )?taken|just took|taken my|(le|kha|khaa) (li|liya|lii)|li hai|le chuki|kha chuki)\b/.test(lower)
+    || (mentionsMedicine && /\b(i (just |already )?had|i'?ve (just |already )?had|i have (just |already )?had|just had)\b/.test(lower));
+  if (!report || /\banother\b|\bagain\b|\bextra\b/.test(lower)) return null;
+  const med = medRef(lower);
+  return med ? { med, taken_at: whenTaken(lower, now) } : null;
+}
+
 function medRef(lower: string): string | null {
   const m = MED_WORDS.exec(lower);
   if (m) return m[1];

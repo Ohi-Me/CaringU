@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "node:crypto";
 import { BedrockRuntimeClient, ConverseCommand, type Message, type Tool } from "@aws-sdk/client-bedrock-runtime";
-import { ruleAgent } from "./ruleAgent.js";
+import { doseReport, ruleAgent } from "./ruleAgent.js";
 import { enforce, runScreen, type ScreenOutcome } from "./screen.js";
 import { NEBIUS, nebiusConfigured, nebiusStatus, nemotronAgent } from "./nemotron.js";
 import type { Clock } from "./care.js";
@@ -273,6 +273,8 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       // Models only see earlier turns as text, so on a yes/no answer tell them which approvals
       // are actually waiting (real ids from the server) instead of letting them guess.
       let directReply: string | null = null;
+      let directMode = "approval";
+      let doseIntercept: any = null; // result of the server-side record_dose for this message
       const saysNo = /^\s*(no|nope|not now|cancel|don'?t|nahi)\b/i.test(lastUser);
       if (provider !== "rules" && (AFFIRM.test(lastUser) || saysNo)) {
         const ov = await mcp.call("get_care_overview", {});
@@ -288,6 +290,28 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
         } else if (pending.length)
           screen.notes.push(`Actions waiting for the user's answer: ${pending.map((p: any) => `confirmation_id=${p.confirmation_id} (${p.summary})`).join("; ")}. Use these exact ids with confirm_action.`);
       }
+      // Dose reports always go through record_dose before any model sees them, so a possible
+      // double dose is always caught and asked about, whatever the model would have done.
+      const dupQ = /records show (\w+) at (\d{1,2}:\d{2})\. is that the dose you mean/i.exec([...history].slice(0, -1).reverse().find((t) => t.role === "assistant")?.text ?? "");
+      if (provider !== "rules" && !directReply && !screen.terminalReply && /^asha/i.test(speaker)) {
+        if (dupQ && EXTRA.test(lastUser)) {
+          const r = await trackedCall("record_dose", { medication: dupQ[1], recorded_by: speaker, extra_dose_confirmed: true });
+          directMode = "dose-check";
+          directReply = r?.ok ? (r.data.extra_dose?.guidance_for_user ?? `Recorded ${r.data.medication}.`) : `I couldn't record that: ${r?.error?.message}`;
+        } else if (dupQ && /\b(same|that one|that's it|no)\b/i.test(lastUser)) {
+          directMode = "dose-check";
+          directReply = `Okay, nothing changed. Your ${dupQ[1]} stays recorded at ${dupQ[2]}.`;
+        } else {
+          const rep = doseReport(lastUser, clock());
+          if (rep) {
+            const r = await trackedCall("record_dose", { medication: rep.med, recorded_by: speaker, ...(rep.taken_at ? { taken_at: rep.taken_at } : {}) });
+            doseIntercept = r;
+            if (r?.ok && r.data.status === "possible_duplicate") { directMode = "dose-check"; directReply = r.data.question_for_user; }
+            else if (r?.ok) screen.notes.push(`record_dose was already called for this message (status ${r.data.status}${r.data.taken_at ? `, ${r.data.medication} at ${r.data.taken_at}` : ""}${r.data.refill_warning ? `; ${r.data.refill_warning}` : ""}). Do not call record_dose again; confirm it briefly.`);
+            else screen.notes.push(`record_dose for "${rep.med}" failed: ${r?.error?.message}. Ask which medicine they mean.`);
+          }
+        }
+      }
       let text: string, mode: string = provider;
       let usedModel: string | null = null;
       let fallback: { from: string; reason: string } | null = null;
@@ -297,10 +321,12 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
         mode = "safety-screen";
       } else if (directReply) {
         text = directReply;
-        mode = "approval";
+        mode = directMode;
       } else if (provider !== "rules") {
         try {
-          const guardedCall = guarded(trackedCall, lastUser, emit, speaker);
+          // The dose was already recorded server-side this turn: a second record_dose returns that result instead of recording again.
+          const callOnce: CallTool = async (n, a) => (n === "record_dose" && doseIntercept && !a.extra_dose_confirmed ? doseIntercept : trackedCall(n, a));
+          const guardedCall = guarded(callOnce, lastUser, emit, speaker);
           if (provider === "nebius") {
             const out = await nemotronAgent(history, speaker, mcp.tools, guardedCall, emit, systemPrompt(clock(), speaker), screen);
             text = enforce(out.text, screen);
