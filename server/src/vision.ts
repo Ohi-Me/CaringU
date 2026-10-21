@@ -31,13 +31,13 @@ export function photoPath(id: string, annotated = false) {
   return existsSync(p) ? p : null;
 }
 
-function readPhoto(id: string) {
+export function readPhoto(id: string) {
   const p = photoPath(id);
   if (!p) throw new ToolError("PHOTO_NOT_FOUND", `No photo ${id}. Upload it first.`);
   return readFileSync(p);
 }
 
-async function callVision(path: string, form: FormData) {
+export async function callVision(path: string, form: FormData) {
   let res: Response;
   try {
     res = await fetch(`${VISION_URL}${path}`, { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });

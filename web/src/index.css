@@ -215,8 +215,10 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
 .strip-result { margin: 0; }
 .strip-result img, .reg-preview { width: 100%; border-radius: 16px; display: block; }
 .strip-result figcaption { font-size: var(--t-xs); color: var(--ink); margin-top: 6px; }
-.camera-row { display: flex; }
-.camera-row button { flex: 1; font-size: var(--t-s); background: var(--paper); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line); }
+.camera-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.samples { align-items: center; }
+.samples .small { width: 100%; color: var(--ink); font-weight: 700; }
+.camera-row button { flex: 1 1 180px; font-size: var(--t-s); background: var(--paper); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line); }
 .ask { display: flex; gap: 8px; }
 .ask input { flex: 1; min-width: 0; font-size: var(--t-s); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -1,0 +1,30 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LaunchAndManageTheDemoServer",
+      "Effect": "Allow",
+      "Action": ["ec2:*"],
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "us-east-1" } }
+    },
+    {
+      "Sid": "FindTheLatestAmazonLinuxImage",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters"],
+      "Resource": "arn:aws:ssm:us-east-1::parameter/aws/service/*"
+    },
+    {
+      "Sid": "CreateOnlyTheCaringUInstanceRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:GetRole", "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:PassRole",
+        "iam:CreateInstanceProfile", "iam:GetInstanceProfile", "iam:AddRoleToInstanceProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/caringu-*",
+        "arn:aws:iam::*:instance-profile/caringu-*"
+      ]
+    }
+  ]
+}

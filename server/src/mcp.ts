@@ -4,6 +4,7 @@ import { z } from "zod";
 import * as care from "./care.js";
 import type { DB } from "./db.js";
 import * as vision from "./vision.js";
+import * as lens from "./lens.js";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Local date YYYY-MM-DD; omit for today");
 const actor = z.string().min(1).max(60).optional().describe("Who is speaking, e.g. 'Asha (voice)' or 'Ravi (son)'");
@@ -268,6 +269,12 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
       rows: z.number().int().min(1).max(6).optional(),
     },
   }, (a) => vision.registerStrip(db, a.photo_id, a.medication, a.total_cavities, a.pills_in_strip, a.rows));
+
+  tool("check_code_with_camera", {
+    title: "Scam Lens: check a QR code or payment request",
+    description: "Looks at a photo of a QR code (on paper, a screen or a message) with OpenCV, decodes it and judges it with fixed rules: a UPI or PayPal payment code that is presented as money for her (prize, refund, KYC) is a scam; look-alike bank links, app downloads and crypto requests are scams; other links are flagged if risky. Scams alert the family and block the payee. Returns a sentence to say to her.",
+    input: { photo_id: photoId, context: z.string().max(300).optional().describe("What she was told about the code, in her words") },
+  }, (a, now) => lens.checkCode(db, now, a.photo_id, a.context ?? ""));
 
   tool("list_strip_checks", {
     title: "Recent strip checks", readOnly: true,

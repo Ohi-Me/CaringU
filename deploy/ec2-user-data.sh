@@ -52,7 +52,7 @@ After=network-online.target
 User=caringu
 WorkingDirectory=/opt/caringu/app/vision
 Environment=VISION_REFS_DIR=/opt/caringu/data/refs
-ExecStart=/opt/caringu/app/vision/.venv/bin/python -m uvicorn caringu_vision.app:app --host 127.0.0.1 --port 8790
+ExecStart=/opt/caringu/app/vision/.venv/bin/python -m uvicorn carecircle_vision.app:app --host 127.0.0.1 --port 8790
 Restart=always
 [Install]
 WantedBy=multi-user.target

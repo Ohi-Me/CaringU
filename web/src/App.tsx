@@ -20,6 +20,13 @@ const SUGGESTIONS = [
   "When is my next doctor appointment?",
 ];
 
+// Generated sample photos (vision/scripts/make_lens_samples.py) so Scam Lens can be tried without a code to hand.
+const LENS_SAMPLES = [
+  { file: "prize-flyer.jpg", label: "\"You won ₹5,000\" flyer", say: "This flyer says I won cashback. Should I scan it?" },
+  { file: "kyc-message.jpg", label: "Bank KYC message", say: "I got this message that my bank account is blocked." },
+  { file: "pharmacy-bill.jpg", label: "Pharmacy bill", say: "This is my pharmacy bill. Is the code okay?" },
+];
+
 const PAGES: { id: Route; href: string; label: string }[] = [
   { id: "home", href: "#/", label: "Home" },
   { id: "try", href: "#/try", label: "Try it" },
@@ -222,6 +229,8 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
   const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
   const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
   const [stripImage, setStripImage] = useState<string | null>(null);
+  // Which camera check the next photo is for: a medicine strip, or Scam Lens (a QR code or payment request).
+  const [cameraKind, setCameraKind] = useState<"strip" | "lens">("strip");
   const [moment, setMoment] = useState<{ from: string; text: string; photo: string; at: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   deviceAskRef.current = deviceAsk;
@@ -281,7 +290,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
     setTick((x) => x + 1);
   };
 
-  const send = useCallback(async (text: string, photoId?: string) => {
+  const send = useCallback(async (text: string, photoId?: string, photoKind?: "strip" | "lens") => {
     text = text.trim();
     if (!text || orb === "thinking") return;
     const history = [...turns, { role: "user" as const, text }];
@@ -292,7 +301,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
     let final = "";
     let by: AnsweredBy | undefined;
     try {
-      const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker, elicitation: true, ...(photoId ? { photo_id: photoId } : {}) }) });
+      const res = await fetch("/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ history, speaker, elicitation: true, ...(photoId ? { photo_id: photoId, photo_kind: photoKind ?? "strip" } : {}) }) });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -309,9 +318,9 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
           if (e.type === "mcp") trace({ source: "agent", kind: "mcp", label: e.method === "initialize" ? `initialize → protocol ${e.protocolVersion}` : `tools/list → ${e.count} tools`, ok: true, ms: e.ms });
           else if (e.type === "tool_result") {
             trace({ source: "agent", kind: "tools/call", label: e.name, ok: e.ok, ms: e.ms, detail: e.result });
-            if (e.name === "inspect_medicine_strip") setStripImage(e.result?.data?.evidence?.annotated_image ? `${e.result.data.evidence.annotated_image}?t=${Date.now()}` : null);
+            if (e.name === "inspect_medicine_strip" || e.name === "check_code_with_camera") setStripImage(e.result?.data?.evidence?.annotated_image ? `${e.result.data.evidence.annotated_image}?t=${Date.now()}` : null);
           }
-          else if (e.type === "model") trace({ source: "agent", kind: "model", label: `Bedrock ${e.model} step ${e.step + 1} (${e.stop})`, ok: true, ms: e.ms, detail: e.usage });
+          else if (e.type === "model") trace({ source: "agent", kind: "model", label: `${e.model} step ${e.step + 1} (${e.stop})`, ok: true, ms: e.ms, detail: e.usage });
           else if (e.type === "warning") trace({ source: "agent", kind: "warning", label: e.message, ok: false });
           else if (e.type === "safety") trace({ source: "agent", kind: "safety", label: `Safety screen: health ${e.triage}${e.triage_signals.length ? ` (${e.triage_signals.join(", ")})` : ""} · scam ${e.scam}${e.scam_score !== null ? ` (${e.scam_score}/100)` : ""}`, detail: e });
           else if (e.type === "elicit") {
@@ -380,15 +389,18 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
   };
 
   const last = [...turns].reverse();
-  // "Show a strip": camera photo -> resized in the browser -> uploaded -> sent with the message.
-  const showStrip = async (file: File) => {
+  // Camera: photo -> resized in the browser -> uploaded -> sent with the message (strip check or Scam Lens).
+  const showPhoto = async (file: File, kind: "strip" | "lens", say?: string) => {
     try {
       setStripImage(null);
+      setCameraKind(kind);
       const blob = await downscale(file, 1600);
       const up = await fetch("/api/vision/photo", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob }).then((r) => r.json());
       if (!up.ok) throw new Error(up.error);
-      trace({ source: "dashboard", kind: "photo", label: `Strip photo uploaded (${Math.round(blob.size / 1024)} KB)`, ok: true });
-      send("I'm showing you my medicine strip.", up.photo_id);
+      trace({ source: "dashboard", kind: "photo", label: `${kind === "lens" ? "Scam Lens" : "Strip"} photo uploaded (${Math.round(blob.size / 1024)} KB)`, ok: true });
+      // For Scam Lens, anything she typed first is what she was told about the code ("he said I'd get a refund").
+      if (kind === "lens") send(say ?? (input.trim() || "Someone sent me this code. Is it safe?"), up.photo_id, "lens");
+      else send("I'm showing you my medicine strip.", up.photo_id, "strip");
     } catch (e: any) {
       trace({ source: "dashboard", kind: "photo", label: `Photo upload failed: ${e?.message ?? e}`, ok: false });
     }
@@ -471,10 +483,22 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
               <figcaption><b>From {moment.from}</b> {moment.text.replace(/^.*?shared a photo:\s*/, "")}</figcaption>
             </figure>
           )}
-          {stripImage && <figure className="strip-result"><img src={stripImage} alt="Strip check: green circles are pills found, red are empty cavities" /><figcaption>Strip check: green = pill, red = empty</figcaption></figure>}
+          {stripImage && (cameraKind === "lens"
+            ? <figure className="strip-result"><img src={stripImage} alt="Scam Lens: the code CaringU read is outlined" /><figcaption>Scam Lens: the code it read is outlined</figcaption></figure>
+            : <figure className="strip-result"><img src={stripImage} alt="Strip check: green circles are pills found, red are empty cavities" /><figcaption>Strip check: green = pill, red = empty</figcaption></figure>)}
           <div className="camera-row">
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) showStrip(f); e.target.value = ""; }} />
-            <button className="ghost" onClick={() => fileRef.current?.click()} disabled={orb === "thinking"}>Show a medicine strip to the camera</button>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) showPhoto(f, cameraKind); e.target.value = ""; }} />
+            <button className="ghost" onClick={() => { setCameraKind("lens"); fileRef.current?.click(); }} disabled={orb === "thinking"}>Check a QR code or payment request</button>
+            <button className="ghost" onClick={() => { setCameraKind("strip"); fileRef.current?.click(); }} disabled={orb === "thinking"}>Show a medicine strip</button>
+          </div>
+          <div className="chips samples">
+            <span className="small">No code to hand? Try a sample:</span>
+            {LENS_SAMPLES.map((x) => (
+              <button key={x.file} className="chip" disabled={orb === "thinking"} onClick={async () => {
+                const blob = await fetch(`/samples/${x.file}`).then((r) => r.blob());
+                showPhoto(new File([blob], x.file, { type: "image/jpeg" }), "lens", x.say);
+              }}>{x.label}</button>
+            ))}
           </div>
           <form className="ask" onSubmit={(e) => { e.preventDefault(); send(input); }}>
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Or type here…" aria-label="Message" />
@@ -920,8 +944,11 @@ function answeredLabel(by: AnsweredBy) {
   if (by.mode === "safety-screen") return "Answered by the deterministic safety screen";
   if (by.mode === "approval") return "Your yes/no was applied directly (no model involved)";
   if (by.mode === "dose-check") return "Handled by the deterministic dose check (no model involved)";
+  if (by.mode === "lens-check") return "Checked by Scam Lens: OpenCV read the code, fixed rules judged it (no model involved)";
+  if (by.mode === "nebius") return `Answered by NVIDIA Nemotron on Nebius (${by.model})`;
+  if (by.mode === "nebius-partial") return `Nemotron failed part-way (${by.fallback?.reason}); no retry, to avoid duplicate actions`;
   if (by.mode === "bedrock") return `Answered by Amazon Bedrock (${by.model})`;
   if (by.mode === "bedrock-partial") return `Bedrock failed part-way (${by.fallback?.reason}); no retry, to avoid duplicate actions`;
-  if (by.fallback) return `Rule-based fallback: Bedrock unavailable (${by.fallback.reason})`;
+  if (by.fallback) return `Rule-based fallback: ${by.fallback.from === "nebius" ? "Nemotron" : "Bedrock"} unavailable (${by.fallback.reason})`;
   return "Answered by the rule-based planner";
 }

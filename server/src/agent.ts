@@ -257,7 +257,9 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       const lastUser = history[history.length - 1].text;
       const screen = await runScreen(lastUser, speaker, mcp.call, emit);
       const photoId = typeof req.body?.photo_id === "string" && /^ph_[a-f0-9]{12}$/.test(req.body.photo_id) ? req.body.photo_id : undefined;
-      if (photoId) {
+      // Scam Lens photos are judged by OpenCV + fixed rules before any model sees the message.
+      const lensPhoto = photoId && req.body?.photo_kind === "lens" ? photoId : undefined;
+      if (photoId && !lensPhoto) {
         screen.photoId = photoId;
         screen.notes.push(`The user attached a photo of a medicine strip (photo_id=${photoId}). Call inspect_medicine_strip with it and explain the verdict in plain words.`);
       }
@@ -275,8 +277,17 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       let directReply: string | null = null;
       let directMode = "approval";
       let doseIntercept: any = null; // result of the server-side record_dose for this message
+      if (lensPhoto) {
+        const r = await trackedCall("check_code_with_camera", { photo_id: lensPhoto, context: lastUser.slice(0, 300) });
+        directMode = "lens-check";
+        directReply = r?.ok ? r.data.spoken
+          : r?.error?.code === "VISION_UNAVAILABLE" ? "I can't look at photos right now. Please don't scan or pay anything until you've spoken to Ravi."
+          : `I couldn't check that photo (${r?.error?.message ?? "unknown error"}). Please don't scan or pay anything until you've spoken to Ravi.`;
+        // When her words were already a scam on their own, say both: the screen's warning, then what the code does.
+        if (screen.terminalReply && r?.ok) screen.terminalReply = `${screen.terminalReply} ${r.data.spoken}`;
+      }
       const saysNo = /^\s*(no|nope|not now|cancel|don'?t|nahi)\b/i.test(lastUser);
-      if (provider !== "rules" && (AFFIRM.test(lastUser) || saysNo)) {
+      if (provider !== "rules" && !lensPhoto && (AFFIRM.test(lastUser) || saysNo)) {
         const ov = await mcp.call("get_care_overview", {});
         const pending = ov?.data?.pending_confirmations ?? [];
         const prevAssistant = [...history].slice(0, -1).reverse().find((t) => t.role === "assistant")?.text ?? "";

@@ -42,6 +42,10 @@ save("ref", [True]*10, 1, 0)
 save("p10", [True]*10, 11, 0.12)
 save("p9", [False] + [True]*9, 12, 0.12)
 save("p7", [False]*3 + [True]*7, 13, 0.12)
+# Scam Lens: a "receive your prize" UPI code, photographed tilted on a busy background.
+q = cv2.QRCodeEncoder.create().encode("upi://pay?pa=prize-desk@okaxis&pn=Prize%20Desk&am=5000&cu=INR&tn=Receive%20your%20prize")
+q = cv2.copyMakeBorder(cv2.resize(q, None, fx=10, fy=10, interpolation=cv2.INTER_NEAREST), 60, 60, 60, 60, cv2.BORDER_CONSTANT, value=255)
+cv2.imwrite(f"{d}/qr_scam.jpg", photograph(cv2.cvtColor(q, cv2.COLOR_GRAY2BGR), seed=21, tilt=0.1, background="random")[0])
 `, imgDir], { cwd: VISION_DIR });
   const refs = mkdtempSync(join(tmpdir(), "cc-refs-"));
   procs.push(spawn(PY, ["-m", "uvicorn", "carecircle_vision.app:app", "--port", String(VISION_PORT)], {
@@ -109,5 +113,24 @@ test("unknown photo is refused, nothing recorded", { skip }, async () => {
   const up = await (await fetch(`${BASE}/api/vision/photo`, { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blank })).json();
   const r = (await c.callTool({ name: "inspect_medicine_strip", arguments: { photo_id: up.photo_id } })).structuredContent as any;
   assert.equal(r.data.recognised, false);
+  await c.close();
+});
+
+test("scam lens: a prize UPI code is decoded by OpenCV, judged a scam, family alerted, payee blocked", { skip }, async () => {
+  const photo_id = await upload("qr_scam");
+  const res = await fetch(`${BASE}/api/agent/chat`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ history: [{ role: "user", text: "Can you check this code for me?" }], speaker: "Asha (voice)", photo_id, photo_kind: "lens" }) });
+  const events = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+  const final = events.find((e) => e.type === "final");
+  assert.equal(final.mode, "lens-check");
+  assert.match(final.text, /Don't scan or pay this/);
+  assert.match(final.text, /5000/);
+  const tool = events.find((e) => e.type === "tool_result" && e.name === "check_code_with_camera");
+  assert.equal(tool.result.data.verdict, "scam");
+  assert.deepEqual(tool.result.data.blocked_payees, ["prize-desk@okaxis"]);
+  const c = new Client({ name: "family", version: "1" });
+  await c.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`)));
+  const alerts = ((await c.callTool({ name: "list_alerts", arguments: {} })).structuredContent as any).data;
+  assert.ok(alerts.some((a: any) => a.kind === "scam_code" && a.severity === "urgent"));
   await c.close();
 });

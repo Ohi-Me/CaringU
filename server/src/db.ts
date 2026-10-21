@@ -76,7 +76,12 @@ export function openDb(path: string): DB {
     CREATE TABLE IF NOT EXISTS strip_checks (
       id TEXT PRIMARY KEY, at TEXT NOT NULL, medication_id TEXT NOT NULL, ref_id TEXT NOT NULL,
       remaining INTEGER NOT NULL, total INTEGER NOT NULL, photo_id TEXT NOT NULL, verdict TEXT NOT NULL
-    );`);
+    );
+    -- Scam Lens: codes she showed the camera, and payees blocked because a code was a scam.
+    CREATE TABLE IF NOT EXISTS lens_checks (
+      id TEXT PRIMARY KEY, at TEXT NOT NULL, photo_id TEXT NOT NULL, verdict TEXT NOT NULL, summary TEXT, payee TEXT
+    );
+    CREATE TABLE IF NOT EXISTS blocked_payees (payee TEXT PRIMARY KEY, reason TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL);`);
   return db;
 }
 

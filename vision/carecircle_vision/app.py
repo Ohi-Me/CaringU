@@ -1,4 +1,4 @@
-"""CaringU vision service: OpenCV 5 blister-strip registration and inspection over HTTP.
+"""CaringU vision service: OpenCV 5 blister-strip checks and Scam Lens (QR codes) over HTTP.
 
 Called by the CaringU MCP server (Node), never directly by the language model.
 Images are processed in memory; only reference strips (canonical image + metadata)
@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-from . import strip
+from . import lens, strip
 
 REFS_DIR = Path(os.environ.get("VISION_REFS_DIR", Path(__file__).resolve().parent.parent / "data" / "refs"))
 MAX_BYTES = 12 * 1024 * 1024
@@ -119,4 +119,13 @@ async def inspect(image: UploadFile = File(...)):
     result["annotated_jpeg_b64"] = _jpeg_b64(result.pop("annotated", None))
     result.pop("scale", None)
     result["opencv"] = cv2.__version__
+    return result
+
+
+@app.post("/scan")
+async def scan(image: UploadFile = File(...)):
+    """Scam Lens: decode any QR codes in the photo; the Node server judges what they mean."""
+    img = await _read_image(image)
+    result = lens.scan(img)
+    result["annotated_jpeg_b64"] = _jpeg_b64(result.pop("annotated", None)) if result["codes"] else None
     return result
