@@ -33,6 +33,18 @@ Scammers now send QR codes that supposedly *give* money ("scan to receive your â
 
 On 640 generated photos with controlled distance, blur, tilt, lighting and JPEG damage, the plain OpenCV call read **89.7%** of codes and the ladder read **99.5%**, with **no wrong reads**, at a median 44 ms per photo. Generated photos measure robustness, not real-world accuracy; real phone photos are reported separately. Full results: [docs/lens-eval.md](docs/lens-eval.md).
 
+### Safe Pay: she can pay by voice, the way her family set it up
+
+"Pay the pharmacy 12.50 dollars for my refill." The agent calls `pay_bill`; fixed rules in [`pay.ts`](server/src/pay.ts) decide before any money moves:
+
+| Situation | What happens |
+|---|---|
+| Approved payee, within its per-payment limit and the daily limit | The MCP server asks her for a yes (elicitation), then pays through **PayPal** (sandbox) |
+| New payee, larger amount, or over the daily limit | Waits on the family's phone (Payments) with the reason; Ravi approves or declines |
+| Payee blocked by Scam Lens, or a scam alert nobody has answered yet | Refused, and the family is told |
+
+Money moves only through PayPal: from an account the family linked once (Vault v3 payment token, so approved bills complete without a redirect), or by Ravi approving the order in PayPal (Orders v2, then capture). Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` (sandbox app) and `PUBLIC_URL` in `.env`. Without keys, nothing is paid and the app says so.
+
 ### Strip check: the camera answers "did I take it?"
 
 CaringU's records only know doses someone reported. The **strip check** adds evidence:
@@ -160,7 +172,7 @@ Use the returned `Mcp-Session-Id` header on later requests. Declare `"capabiliti
 
 ```bash
 cd server
-npm test          # 57 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
+npm test          # 62 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
                   #           model-fallback regressions, Scam Lens rules, end-to-end strip check and Scam Lens (Node -> OpenCV)
 npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (server running)
 npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)

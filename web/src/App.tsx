@@ -961,6 +961,19 @@ const JUDGES: { id: string; name: string; tryIt: string[]; uses: string[]; measu
     code: ["vision/carecircle_vision/lens.py", "vision/carecircle_vision/strip.py", "server/src/lens.ts", "vision/scripts/eval_lens.py"],
   },
   {
+    id: "paypal", name: "PayPal",
+    tryIt: [
+      "On Asha's speaker, tap \"Pay the pharmacy 12.50 dollars for my Amlodipine refill\". It is an approved payee within its limit, so the server asks her for a yes and then pays through PayPal (sandbox).",
+      "Say \"Pay the pharmacy 40 dollars for three months of medicine\". It is over the $25 limit, so it waits on Ravi's phone under Payments with the reason; approve it there and finish in PayPal.",
+      "Tap the \"You won ₹5,000\" flyer first, then ask to pay Prize Desk: Scam Lens blocked that payee, so the payment is refused and the family is told.",
+    ],
+    uses: ["PayPal REST APIs in the sandbox: OAuth client credentials, Orders v2 (create and capture), Vault v3 (setup token, then payment token) so the family links PayPal once",
+      "Fixed payment rules before any money moves: approved payees, per-payment and daily limits, payees blocked by Scam Lens, and a hold while a scam alert is unanswered",
+      "Agentic commerce with a human in the loop: the agent (Bedrock or Nemotron) calls pay_bill; her yes arrives by MCP elicitation, the family's approval in the app, and the model never decides"],
+    measured: "62 automated server tests, including Safe Pay against a mock PayPal sandbox: paid on her yes within limits, family approval above limits, refusal for blocked payees, and nothing paid without keys.",
+    code: ["server/src/pay.ts", "server/test/pay.test.ts", "server/src/lens.ts", "server/src/mcp.ts"],
+  },
+  {
     id: "nvidia", name: "NVIDIA Nemotron on Nebius",
     tryIt: [
       "Set AGENT_MODE=nebius and NEBIUS_API_KEY in .env, then npm start in server/. The same app now runs on Nemotron.",
@@ -1044,7 +1057,7 @@ function About({ events }: { events: TraceEvent[] }) {
             {EVALS.map((e) => <tr key={e.set}><th scope="row">{e.set}</th><td>{e.bedrock} of {e.n}</td><td>{e.nemotron} of {e.n}</td></tr>)}
           </tbody>
         </table>
-        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 57 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in the OpenCV tab above.</p>
+        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 62 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in the OpenCV tab above.</p>
       </section>
 
       <section id="trace" aria-labelledby="trace-title">
