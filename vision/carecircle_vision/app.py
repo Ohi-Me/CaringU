@@ -1,6 +1,6 @@
-"""CareCircle vision service: OpenCV 5 blister-strip registration and inspection over HTTP.
+"""CaringU vision service: OpenCV 5 blister-strip registration and inspection over HTTP.
 
-Called by the CareCircle MCP server (Node), never directly by the language model.
+Called by the CaringU MCP server (Node), never directly by the language model.
 Images are processed in memory; only reference strips (canonical image + metadata)
 are stored, under data/refs. Run: uvicorn carecircle_vision.app:app --port 8790
 """
@@ -23,7 +23,7 @@ REFS_DIR = Path(os.environ.get("VISION_REFS_DIR", Path(__file__).resolve().paren
 MAX_BYTES = 12 * 1024 * 1024
 ANNOTATED_MAX = 1000
 
-app = FastAPI(title="CareCircle vision", version="0.1.0")
+app = FastAPI(title="CaringU vision", version="0.1.0")
 _lock = threading.Lock()
 _refs: list[strip.Reference] = []
 

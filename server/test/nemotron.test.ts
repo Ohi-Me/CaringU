@@ -37,7 +37,7 @@ before(async () => {
     if (last.role === "tool") return res.json(answer(`<think>check the record first</think>Done, based on the tool result: ${String(last.content).slice(0, 40)}`));
     if (/BAD_JSON/.test(firstUser)) return res.json(toolCall("list_medications", "{not json"));
     if (/BP pill/i.test(firstUser)) return res.json(toolCall("check_dose_status", JSON.stringify({ medication: "bp" })));
-    return res.json(answer("<think>easy</think>Hello, I'm CareCircle."));
+    return res.json(answer("<think>easy</think>Hello, I'm CaringU."));
   });
   await new Promise<void>((r) => { mock = app.listen(MOCK_PORT, () => r()); });
 

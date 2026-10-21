@@ -24,7 +24,7 @@ const REGION = process.env.AWS_REGION ?? "us-east-1";
 const MAX_STEPS = 8;
 
 export function systemPrompt(now: Date, speaker: string) {
-  return `You are CareCircle, a warm, patient voice assistant (Alexa+-style) for Asha Mehra, 78, and her family caregivers.
+  return `You are CaringU, a warm, patient voice assistant (Alexa+-style) for Asha Mehra, 78, and her family caregivers.
 Current local time: ${now.toString()}. Current speaker: ${speaker}.
 Rules:
 - Facts come ONLY from tool results. Never guess whether a dose was taken; call check_dose_status or get_care_overview.
@@ -52,7 +52,7 @@ const pendingElicitations = new Map<string, (answer: { approve: boolean } | null
 const ELICIT_TIMEOUT_MS = 110_000;
 
 async function connectMcp(url: string, emit: Emit, opts: { elicitation: boolean; speaker: string }) {
-  const client = new Client({ name: "carecircle-agent", version: "0.2.0" },
+  const client = new Client({ name: "caringu-agent", version: "0.2.0" },
     opts.elicitation ? { capabilities: { elicitation: { form: {} } } } : undefined);
   if (opts.elicitation) {
     // The MCP server asks for approval mid-tool-call; we relay the question to the
@@ -369,7 +369,7 @@ export function agentRouter(mcpUrl: string, clock: Clock) {
       console.log(`[agent] answered_by=${mode}${model ? ` model=${model}` : ""}${fallback ? ` fallback_from=${fallback.from} reason="${fallback.reason}"` : ""} ms=${total_ms}`);
       emit({ type: "final", text, mode, model, fallback, total_ms });
     } catch (e: any) {
-      emit({ type: "error", message: `Could not reach the CareCircle MCP server: ${e?.message ?? e}` });
+      emit({ type: "error", message: `Could not reach the CaringU MCP server: ${e?.message ?? e}` });
     } finally {
       await mcp?.close();
       res.end();

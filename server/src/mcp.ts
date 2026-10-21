@@ -1,4 +1,4 @@
-// MCP server definition: every CareCircle capability is a small, validated MCP tool.
+// MCP server definition: every CaringU capability is a small, validated MCP tool.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as care from "./care.js";
@@ -16,7 +16,7 @@ interface Ctx { confirm: (message: string) => Promise<Confirmation> }
 
 export function buildMcpServer(db: DB, clock: care.Clock) {
   const server = new McpServer(
-    { name: "carecircle", title: "CareCircle", version: "0.2.0" },
+    { name: "caringu", title: "CaringU", version: "0.2.0" },
     { instructions: "Tools for a voice assistant that helps an older adult manage medicines, appointments and wellbeing while keeping family caregivers informed. All data is sample/demo data. Never diagnose; red-flag symptoms must be escalated. Consequential actions (refills, appointment changes) ask the human directly through MCP elicitation when the client supports it; otherwise they return a confirmation_id and only happen after confirm_action." },
   );
 
@@ -184,7 +184,7 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
 
   tool("notify_family", {
     title: "Message the family",
-    description: "Send a message to the caregivers' CareCircle dashboard (e.g. 'please call me', 'I need a ride tomorrow').",
+    description: "Send a message to the caregivers' CaringU dashboard (e.g. 'please call me', 'I need a ride tomorrow').",
     input: { message: z.string().min(2).max(500), severity: z.enum(["info", "warning", "urgent"]).optional() },
   }, (a, now) => care.notifyFamily(db, now, a.message, a.severity ?? "info"));
 
@@ -206,7 +206,7 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
 
   tool("send_message_to_elder", {
     title: "Share a message or family moment with her",
-    description: "A caregiver sends a short message, optionally with a photo (a family moment), that her CareCircle speaker shows and reads aloud (e.g. 'Riya's first day at school!').",
+    description: "A caregiver sends a short message, optionally with a photo (a family moment), that her CaringU speaker shows and reads aloud (e.g. 'Riya's first day at school!').",
     input: {
       from: z.string().min(1).max(60), text: z.string().min(1).max(300),
       photo_id: z.string().regex(/^ph_[a-f0-9]{12}$/).optional().describe("Id returned by the photo upload"),

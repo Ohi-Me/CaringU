@@ -34,7 +34,7 @@ export async function runScreen(text: string, speaker: string, call: CallTool, e
     if (triage.triage === "urgent") {
       out.terminalReply = r?.ok
         ? `${EMERGENCY_LINE} I've alerted ${who(r)}. Stay where you are; if you can, unlock the door.`
-        : `${EMERGENCY_LINE} I could not reach your family through CareCircle, so please call 112 yourself now.`;
+        : `${EMERGENCY_LINE} I could not reach your family through CaringU, so please call 112 yourself now.`;
       return out;
     }
     out.notes.push(`log_wellbeing was already called for this message (triage: watch, signals: ${triage.signals.join(", ")}); family informed. Do not call it again; briefly acknowledge how they feel.`);

@@ -1,4 +1,4 @@
-# Photo guide: medicine strips for the CareCircle strip check
+# Photo guide: medicine strips for the CaringU strip check
 
 These photos are the evaluation dataset for the OpenCV competition. They're what proves the vision works on real strips, so follow the naming carefully. About **45–60 photos** total. The phone camera is fine.
 

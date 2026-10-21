@@ -51,7 +51,7 @@ export function runEscalations(db: DB, now: Date) {
         next = new Date(next.getTime() + ESCALATION_MINUTES * MIN);
       } else {
         logEvent(db, a.id, next, "unreached", "No caregiver responded; told her directly to call 112 if she needs help");
-        sendToElder(db, next, "CareCircle", "I haven't been able to reach Ravi or Neha yet. If you need help, please call 112 now, or press your emergency button.", a.id);
+        sendToElder(db, next, "CaringU", "I haven't been able to reach Ravi or Neha yet. If you need help, please call 112 now, or press your emergency button.", a.id);
       }
     }
     db.prepare("UPDATE alerts SET escalation_level=?, next_escalation_at=? WHERE id=?")

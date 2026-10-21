@@ -1,32 +1,37 @@
-/* CareCircle — "Asha's kitchen, Ravi's pocket".
-   Cream throughout: linen walls, paper surfaces, a cream fabric speaker. One quiet teal (tulsi) for
-   actions; haldi and sindoor appear only when something needs attention. */
+/* CaringU: Sage & Forest. Cream is the page (about half of what you see); sage carries cards,
+   bands and the two devices; forest green is for actions, headings and navigation; gold is a
+   small accent. Red and amber appear only on real alerts, so they never look decorative. */
 
 :root {
-  --linen: #F6EFE2;        /* page: warm cream */
-  --paper: #FFFCF5;        /* surfaces */
-  --wash: #EFE6D4;         /* quiet fills */
-  --line: #E2D7C3;         /* borders */
-  --ink: #2B2620;          /* text: warm near-black */
-  --ink-soft: #6B6254;     /* secondary text */
-  --tulsi: #1F6F6B;        /* actions */
-  --tulsi-soft: #DCEBE7;
-  --haldi: #A86F0C;        /* warnings */
-  --haldi-soft: #FAEBCB;
+  --linen: #FFFDD0;        /* page: light cream */
+  --paper: #FFFFF2;        /* surfaces: near-white cream */
+  --wash: #F3F0C4;         /* quiet fills */
+  --line: #D9DCB0;         /* borders */
+  --ink: #1F3328;          /* text: deep forest */
+  --ink-soft: #4C5C4D;     /* secondary text */
+  --heading: #2D5A43;
+  --tulsi: #2D5A43;        /* forest: actions */
+  --tulsi-soft: #DDE4C9;
+  --sage: #A3B18A;
+  --sage-soft: #E3E8C6;    /* cards and bands */
+  --gold: #D6A85F;         /* accent */
+  --gold-soft: #F5E4BC;
+  --haldi: #8A5F10;        /* warnings (darkened gold, readable on cream) */
+  --haldi-soft: #F6E3B6;
   --sindoor: #B4232B;      /* urgent */
   --sindoor-soft: #F8DEDA;
-  --leaf: #2E7D4F;         /* done / taken */
-  --leaf-soft: #E2EFDF;
-  --fabric-a: #EDE3CE;     /* speaker cloth: cream */
-  --fabric-b: #E6DAC2;
-  --frame: #DCCDB1;        /* phone frame: warm sand */
-  --on-accent: #FFFFFF;
-  --focus: #F2B544;
+  --leaf: #2D5A43;         /* done / taken */
+  --leaf-soft: #DDE4C9;
+  --fabric-a: #DCE2C2;     /* speaker cloth: sage */
+  --fabric-b: #D3DAB6;
+  --frame: #A3B18A;        /* phone frame: sage */
+  --on-accent: #FFFDD0;
+  --focus: #D6A85F;
 
   --r-object: 34px;        /* the speaker and the phone */
   --r-panel: 16px;         /* panels inside the phone */
   --r-control: 12px;
-  --lift: 0 1px 0 rgba(43, 38, 32, .04), 0 18px 40px -24px rgba(43, 38, 32, .35);
+  --lift: 0 1px 0 rgba(31, 51, 40, .04), 0 18px 40px -24px rgba(31, 51, 40, .35);
 
   /* type scale (major third) */
   --t-xs: .8125rem; --t-s: 1rem; --t-m: 1.25rem; --t-l: 1.5625rem; --t-xl: 1.953rem; --t-xxl: 3.05rem;
@@ -41,28 +46,30 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --linen: #17140F; --paper: #211D17; --wash: #2B261E; --line: #3B3429;
-    --ink: #F2EBDD; --ink-soft: #B3A893;
-    --tulsi: #6CC5BB; --tulsi-soft: #1E3532;
-    --haldi: #E9B04C; --haldi-soft: #3A2E15;
+    --linen: #14241C; --paper: #1B2F24; --wash: #22382B; --line: #33493A;
+    --ink: #FFFDD0; --ink-soft: #C3CBA9; --heading: #FFFDD0;
+    --tulsi: #A3B18A; --tulsi-soft: #26392D;
+    --sage-soft: #1F3428; --gold-soft: #3A3120;
+    --haldi: #E2B970; --haldi-soft: #3A3120;
     --sindoor: #FF8A80; --sindoor-soft: #3E1D1C;
-    --leaf: #7BD49B; --leaf-soft: #1C3324;
-    --fabric-a: #2E2921; --fabric-b: #29241D;
-    --frame: #0E0C09;
-    --on-accent: #0E201E;
+    --leaf: #B9C99D; --leaf-soft: #26392D;
+    --fabric-a: #24382C; --fabric-b: #203328;
+    --frame: #0D1912;
+    --on-accent: #14241C;
     --lift: 0 18px 40px -22px rgba(0, 0, 0, .7);
   }
 }
 :root[data-theme="dark"] {
-  --linen: #17140F; --paper: #211D17; --wash: #2B261E; --line: #3B3429;
-  --ink: #F2EBDD; --ink-soft: #B3A893;
-  --tulsi: #6CC5BB; --tulsi-soft: #1E3532;
-  --haldi: #E9B04C; --haldi-soft: #3A2E15;
+  --linen: #14241C; --paper: #1B2F24; --wash: #22382B; --line: #33493A;
+  --ink: #FFFDD0; --ink-soft: #C3CBA9; --heading: #FFFDD0;
+  --tulsi: #A3B18A; --tulsi-soft: #26392D;
+  --sage-soft: #1F3428; --gold-soft: #3A3120;
+  --haldi: #E2B970; --haldi-soft: #3A3120;
   --sindoor: #FF8A80; --sindoor-soft: #3E1D1C;
-  --leaf: #7BD49B; --leaf-soft: #1C3324;
-  --fabric-a: #2E2921; --fabric-b: #29241D;
-  --frame: #0E0C09;
-  --on-accent: #0E201E;
+  --leaf: #B9C99D; --leaf-soft: #26392D;
+  --fabric-a: #24382C; --fabric-b: #203328;
+  --frame: #0D1912;
+  --on-accent: #14241C;
   --lift: 0 18px 40px -22px rgba(0, 0, 0, .7);
 }
 
@@ -379,3 +386,20 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
   .orb .ring, .alert.live { animation: none !important; }
   .bubble, .notif, .mini-ring, .notif-btn { transition: none; }
 }
+
+/* ---------------- Sage & Forest accents ---------------- */
+h1, h2 { color: var(--heading); }
+.nav a[aria-current="page"] { background: var(--sage-soft); color: var(--heading); }
+.mini-ring.lit { box-shadow: 0 0 0 5px var(--gold-soft); border-color: var(--gold); }
+.story-steps button[aria-current="step"] { box-shadow: inset 0 -3px 0 var(--gold), inset 0 0 0 1.5px var(--line); }
+/* full-bleed sage band without horizontal scroll */
+.points { background: var(--sage-soft); box-shadow: 0 0 0 100vmax var(--sage-soft); clip-path: inset(0 -100vmax); border-top: 0; }
+.points + .closing { border-top: 0; }
+.point-art { width: 112px; height: 84px; border-radius: 20px; background: var(--paper); display: grid; place-items: center; }
+.point-art svg { width: 88px; height: 66px; }
+.phone-screen { background: var(--sage-soft); }
+.flow li::before { background: var(--gold-soft); box-shadow: inset 0 0 0 2px var(--gold); color: var(--heading); }
+.about > section.builder { background: var(--sage-soft); border-radius: 24px; padding: 24px; border-top: 0; margin-top: 16px; }
+.evals td { color: var(--heading); }
+.foot { padding-top: 20px; border-top: 1px solid var(--line); }
+.tag { display: inline-block; font-size: var(--t-xs); font-weight: 700; padding: .15rem .6rem; border-radius: 999px; background: var(--gold-soft); color: var(--ink); }

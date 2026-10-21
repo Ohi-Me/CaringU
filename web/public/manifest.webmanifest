@@ -1,3 +1,3 @@
-{ "name": "CareCircle", "short_name": "CareCircle", "start_url": "/", "display": "standalone",
-  "background_color": "#f6f3ee", "theme_color": "#0f7c78",
+{ "name": "CaringU", "short_name": "CaringU", "start_url": "/", "display": "standalone",
+  "background_color": "#FFFDD0", "theme_color": "#2D5A43",
   "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }] }

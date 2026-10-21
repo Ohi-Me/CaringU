@@ -1,4 +1,4 @@
-// Browser-side MCP client: the family dashboard reads and writes CareCircle state
+// Browser-side MCP client: the family dashboard reads and writes CaringU state
 // through real MCP initialize / tools/list / tools/call over Streamable HTTP.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -22,7 +22,7 @@ export const trace = (e: Omit<TraceEvent, "at">) => listeners.forEach((l) => l({
 export let toolNames: string[] = [];
 
 async function connect() {
-  const c = new Client({ name: "carecircle-dashboard", version: "0.2.0" }, { capabilities: { elicitation: { form: {} } } });
+  const c = new Client({ name: "caringu-dashboard", version: "0.2.0" }, { capabilities: { elicitation: { form: {} } } });
   c.setRequestHandler(ElicitRequestSchema, async (req) => {
     const message = (req.params as any).message as string;
     trace({ source: "dashboard", kind: "elicitation", label: `Server asks: ${message}` });

@@ -1,4 +1,4 @@
-# CareCircle: one container serves the MCP endpoint (/mcp), the agent API and the web client.
+# CaringU: one container serves the MCP endpoint (/mcp), the agent API and the web client.
 FROM node:24-slim AS web
 WORKDIR /app/web
 COPY web/package*.json ./

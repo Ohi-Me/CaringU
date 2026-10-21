@@ -1,4 +1,4 @@
-# Deploying CareCircle on AWS
+# Deploying CaringU on AWS
 
 > Status: the script below was written for Amazon Linux 2023 but **has not been run yet**. Check each step on the first deploy and update this note.
 
@@ -19,7 +19,7 @@ Name it `carecircle-ec2`.
 - Region **us-east-1**, AMI **Amazon Linux 2023 (arm64)**, type **`t4g.small`** (Graviton; cheaper, and arm64 is what the OpenCV COOL award looks for). x86 `t3.small` also works.
 - Security group: inbound **80** and **443** from anywhere. SSH 22 only from your IP, if you need it.
 - Advanced → IAM instance profile: `carecircle-ec2`.
-- Advanced → User data: paste [`deploy/ec2-user-data.sh`](../deploy/ec2-user-data.sh) (it already points at https://github.com/Ohi-Me/CareCircle).
+- Advanced → User data: paste [`deploy/ec2-user-data.sh`](../deploy/ec2-user-data.sh) (it already points at https://github.com/Ohi-Me/CaringU).
 
 After 3–5 minutes, open `https://<public-ip-with-dashes>.sslip.io`. For example, IP 3.91.10.20 becomes `https://3-91-10-20.sslip.io`.
 

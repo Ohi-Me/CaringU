@@ -25,7 +25,7 @@ const PAGES: { id: Route; href: string; label: string }[] = [
   { id: "try", href: "#/try", label: "Try it" },
   { id: "about", href: "#/about", label: "How it's built" },
 ];
-const TITLES: Record<Route, string> = { home: "CareCircle", try: "Try CareCircle", about: "How CareCircle is built" };
+const TITLES: Record<Route, string> = { home: "CaringU", try: "Try CaringU", about: "How CaringU is built" };
 const readRoute = (): Route => (location.hash.startsWith("#/try") ? "try" : location.hash.startsWith("#/about") ? "about" : "home");
 
 // Three pages: Home (what it is, with a short animated example), Try it (the live demo),
@@ -55,12 +55,12 @@ export default function App() {
   return (
     <div className="app">
       <header className="top">
-        <a className="brand" href="#/" aria-label="CareCircle home">
+        <a className="brand" href="#/" aria-label="CaringU home">
           <svg className="logo" viewBox="0 0 40 40" aria-hidden>
             <circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" strokeWidth="5" />
             <circle cx="20" cy="20" r="5.5" fill="currentColor" />
           </svg>
-          <span>CareCircle</span>
+          <span>CaringU</span>
         </a>
         <nav className="nav" aria-label="Pages">
           {PAGES.map((p) => <a key={p.id} href={p.href} aria-current={route === p.id ? "page" : undefined}>{p.label}</a>)}
@@ -127,8 +127,8 @@ function Story() {
         <div className="mini-speaker">
           <div className="mini-top"><span className={`mini-ring ${step === 2 || step === 4 ? "lit" : ""}`} aria-hidden /> Asha's kitchen speaker</div>
           <p className={`bubble b-her ${show(1)}`}><b>Asha</b>“{STORY[0].text}”</p>
-          <p className={`bubble b-cc ${show(2)}`}><b>CareCircle</b>{STORY[1].text}</p>
-          <p className={`bubble b-cc ${show(4)}`}><b>CareCircle</b>{STORY[3].text}</p>
+          <p className={`bubble b-cc ${show(2)}`}><b>CaringU</b>{STORY[1].text}</p>
+          <p className={`bubble b-cc ${show(4)}`}><b>CaringU</b>{STORY[3].text}</p>
         </div>
         <div className="mini-phone">
           <div className="mini-top">Ravi's phone</div>
@@ -154,7 +154,7 @@ function Story() {
 const POINTS: { title: string; body: string; art: React.ReactElement }[] = [
   {
     title: "Stops scams before she shares anything",
-    body: "She describes a call or a message. CareCircle checks it for scam signs, tells her what to do, and alerts the family.",
+    body: "She describes a call or a message. CaringU checks it for scam signs, tells her what to do, and alerts the family.",
     art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="20" y="8" width="34" height="56" rx="7" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="26" y="16" width="22" height="30" rx="3" fill="var(--wash)" /><path d="M58 22c8 0 16 4 16 4v14c0 10-8 16-16 19-8-3-16-9-16-19V26s8-4 16-4z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /><path d="M58 32v10" stroke="var(--sindoor)" strokeWidth="3" strokeLinecap="round" /><circle cx="58" cy="48" r="2" fill="var(--sindoor)" /></svg>),
   },
   {
@@ -175,7 +175,7 @@ function Home() {
       <section className="hero">
         <div className="hero-text">
           <h1>Ask before you act.</h1>
-          <p className="lead">CareCircle is a voice companion for a parent who lives alone, and a window for their family. It catches scams and double doses, and it never changes anything without a clear yes.</p>
+          <p className="lead">CaringU is a voice companion for a parent who lives alone, and a window for their family. It catches scams and double doses, and it never changes anything without a clear yes.</p>
           <div className="btns">
             <a className="button" href="#/try">Try it yourself</a>
             <a className="button ghost" href="#/about">How it's built</a>
@@ -321,7 +321,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
           }
           else if (e.type === "elicit_answer") { trace({ source: "agent", kind: "elicitation", label: `Answer sent to server: ${e.answer}`, ok: e.answer !== "no answer" }); setDeviceAsk(null); }
           else if (e.type === "guard") trace({ source: "agent", kind: "guard", label: `Blocked ${e.name}: ${e.reason}`, ok: false, detail: e.args });
-          else if (e.type === "error") { trace({ source: "agent", kind: "error", label: e.message, ok: false }); final = `Sorry, I couldn't reach CareCircle. ${e.message}`; }
+          else if (e.type === "error") { trace({ source: "agent", kind: "error", label: e.message, ok: false }); final = `Sorry, I couldn't reach CaringU. ${e.message}`; }
           else if (e.type === "final") {
             final = e.text;
             by = { mode: e.mode, model: e.model ?? null, fallback: e.fallback ?? null };
@@ -433,7 +433,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
       </nav>
 
       <div className="grid">
-        <section className={`echo card device ${mobilePane === "echo" ? "" : "hide-mobile"}`} aria-label="Asha's CareCircle device">
+        <section className={`echo card device ${mobilePane === "echo" ? "" : "hide-mobile"}`} aria-label="Asha's CaringU device">
           <div className="device-label"><span className="dot" aria-hidden /> Asha's kitchen speaker</div>
           <div className="speaker-row">
             <label>Speaking as{" "}
@@ -460,7 +460,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
           )}
           <div className="exchange" aria-live="polite">
             {lastUser && <p className="heard">“{lastUser.text}”</p>}
-            {orb === "thinking" ? <p className="reply muted">Checking CareCircle…</p>
+            {orb === "thinking" ? <p className="reply muted">Checking CaringU…</p>
               : lastAssistant ? <><p className="reply">{lastAssistant.text}</p>{lastAssistant.by && <p className={`answered ${lastAssistant.by.fallback ? "warn-text" : "muted"}`}>{answeredLabel(lastAssistant.by)}</p>}</>
               : <p className="reply muted">Hi Asha. Ask me about your medicines, appointments, or anything that worries you.</p>}
           </div>
@@ -488,7 +488,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
           {turns.length > 2 && (
             <details className="history">
               <summary>Conversation ({turns.length} turns)</summary>
-              {turns.map((t, i) => <p key={i} className={t.role}><b>{t.role === "user" ? "You" : "CareCircle"}:</b> {t.text}</p>)}
+              {turns.map((t, i) => <p key={i} className={t.role}><b>{t.role === "user" ? "You" : "CaringU"}:</b> {t.text}</p>)}
             </details>
           )}
         </section>
@@ -595,7 +595,7 @@ function Family({ tick }: { tick: number }) {
       {ask && (
         <div className="ask-card" role="alertdialog" aria-label="Approval needed">
           <p className="ask-q">{ask.message}</p>
-          <p className="muted small">Asked by the CareCircle server over MCP (elicitation). It runs only if you approve.</p>
+          <p className="muted small">Asked by the CaringU server over MCP (elicitation). It runs only if you approve.</p>
           <div className="btns big">
             <button onClick={() => answer(true)}>Approve as {me.split(" ")[0]}</button>
             <button className="ghost" onClick={() => answer(false)}>Decline</button>
@@ -823,7 +823,7 @@ function About({ events }: { events: TraceEvent[] }) {
   return (
     <main className="about">
       <section className="about-intro">
-        <h1>How CareCircle is built</h1>
+        <h1>How CaringU is built</h1>
         <p className="lead">A language model handles the conversation. Everything that could hurt someone, like a double dose, a scam or a missed emergency, is decided by fixed code that is tested on its own.</p>
       </section>
 
@@ -867,7 +867,7 @@ function About({ events }: { events: TraceEvent[] }) {
       <section className="builder" aria-labelledby="builder-title">
         <h2 id="builder-title">Who built it</h2>
         <p>Built by <b>Rohit Kumar</b>, solo, for the Amazon Developer hackathon (Alexa+ track).</p>
-        <p><a href="https://github.com/Ohi-Me/CareCircle" target="_blank" rel="noreferrer">Source code on GitHub</a></p>
+        <p><a href="https://github.com/Ohi-Me/CaringU" target="_blank" rel="noreferrer">Source code on GitHub</a></p>
       </section>
     </main>
   );
@@ -885,7 +885,7 @@ function Trace({ events }: { events: TraceEvent[] }) {
     <div className="family">
       <div className="card">
         <h2>Live protocol trace</h2>
-        <p className="muted small">Every line is a real JSON-RPC message to the CareCircle MCP server over Streamable HTTP, from the agent (server side) or this dashboard (browser).</p>
+        <p className="muted small">Every line is a real JSON-RPC message to the CaringU MCP server over Streamable HTTP, from the agent (server side) or this dashboard (browser).</p>
         {events.length === 0 ? <p className="muted">Say something to see the tool calls.</p> : (
           <ul className="trace">
             {events.map((e, i) => (

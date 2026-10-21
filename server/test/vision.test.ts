@@ -1,4 +1,4 @@
-// End-to-end strip check: CareCircle MCP tools -> Python OpenCV 5 service -> reconciliation.
+// End-to-end strip check: CaringU MCP tools -> Python OpenCV 5 service -> reconciliation.
 // Uses SYNTHETIC strip photos with known counts. Skipped if the Python venv is missing.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

@@ -1,5 +1,5 @@
 {
-  "_note": "New scenarios written 2026-10-11 by the developer (Claude) BEFORE running them; not seen by the planner/rules during development. Not truly blind (same author as the rules). Demo clock 10:00 (Levothyroxine recorded 07:07, Metformin 08:31, Amlodipine due 09:00, Atorvastatin last recorded yesterday ~21:30).",
+  "_note": "New scenarios written 2026-10-11 by the developer BEFORE running them; not seen by the planner/rules during development. Not truly blind (same author as the rules). Demo clock 10:00 (Levothyroxine recorded 07:07, Metformin 08:31, Amlodipine due 09:00, Atorvastatin last recorded yesterday ~21:30).",
   "cases": [
     { "cat": "scam", "say": "The courier man says I must tell him the code that just came on my phone so he can reschedule my parcel", "requires": ["assess_scam_risk"], "reply": "scam|don'?t share|do not share|hang up" },
     { "cat": "scam", "say": "A girl on WhatsApp says she is Neha's colleague, Neha fainted at the office and I should send 20000 on Google Pay for the hospital", "requires": ["assess_scam_risk"], "reply": "scam|suspicious|don'?t (send|pay)|do not (send|pay)|call neha" },

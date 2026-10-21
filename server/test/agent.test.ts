@@ -47,10 +47,10 @@ before(async () => {
 after(() => { procs.forEach((p) => p.kill()); });
 
 test("distinct messages get distinct, relevant replies (no repeated catch-all)", async () => {
-  const intro = await chat(RULES, "Hello! Please introduce yourself as CareCircle in one sentence.");
+  const intro = await chat(RULES, "Hello! Please introduce yourself as CaringU in one sentence.");
   const gibberish = await chat(RULES, "purple elephants dance on tuesday");
   const today = await chat(RULES, "What do I need to do today?");
-  assert.match(intro.final.text, /CareCircle/);
+  assert.match(intro.final.text, /CaringU/);
   assert.doesNotMatch(gibberish.final.text, /record of Amlodipine/, "unrecognised input must not get the schedule reply");
   assert.match(today.final.text, /Amlodipine/);
   const texts = [intro, gibberish, today].map((r) => r.final.text);
@@ -67,12 +67,12 @@ test("Bedrock credential failure: falls back, says so precisely, leaks nothing",
   assert.equal(mode.credentials.ok, false);
   assert.equal(mode.effective, "rules");
 
-  const r = await chat(BROKEN_BEDROCK, "Hello! Please introduce yourself as CareCircle in one sentence.");
+  const r = await chat(BROKEN_BEDROCK, "Hello! Please introduce yourself as CaringU in one sentence.");
   assert.ok(r.ev.some((e) => e.type === "warning" && /Bedrock unavailable/.test(e.message)), "trace must show the fallback");
   assert.equal(r.final.mode, "rules");
   assert.equal(r.final.fallback.from, "bedrock");
   assert.match(r.final.fallback.reason, /Credential|profile|credential/i);
-  assert.match(r.final.text, /CareCircle/);
+  assert.match(r.final.text, /CaringU/);
   assert.doesNotMatch(r.raw, /AKIA|ASIA|aws_secret_access_key|SecretAccessKey/i);
 });
 

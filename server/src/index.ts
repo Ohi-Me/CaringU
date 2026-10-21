@@ -134,4 +134,4 @@ setInterval(() => { try { runEscalations(db, clock()); } catch (e) { console.err
 // Daily check-in: one gentle family nudge if she has not said anything by CHECKIN_BY.
 setInterval(() => { try { const now = clock(); runCheckins(db, now, (msg) => raiseAlert(db, now, "warning", "no_checkin", msg)); } catch (e) { console.error("[checkin]", e); } }, 30_000).unref();
 
-app.listen(PORT, () => console.log(`CareCircle on http://localhost:${PORT}  (MCP: /mcp)`));
+app.listen(PORT, () => console.log(`CaringU on http://localhost:${PORT}  (MCP: /mcp)`));

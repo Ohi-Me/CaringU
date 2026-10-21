@@ -52,7 +52,7 @@ test("raw JSON-RPC: initialize negotiates 2025-11-25 and opens a session", async
   assert.ok(session.length > 10, "server must assign Mcp-Session-Id");
   const j = await rpcResult(r);
   assert.equal(j.result.protocolVersion, "2025-11-25");
-  assert.equal(j.result.serverInfo.name, "carecircle");
+  assert.equal(j.result.serverInfo.name, "caringu");
   assert.ok(j.result.capabilities.tools);
   assert.equal((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" }, { "Mcp-Session-Id": session })).status, 202);
 });

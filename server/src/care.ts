@@ -1,4 +1,4 @@
-// Domain logic for CareCircle. Deterministic and model-free: the LLM only decides
+// Domain logic for CaringU. Deterministic and model-free: the LLM only decides
 // WHICH of these to call; every fact and every safety rule lives here.
 import { randomUUID } from "node:crypto";
 import { type DB, tx } from "./db.js";
@@ -84,9 +84,9 @@ function lastDose(db: DB, medId: string) {
   return db.prepare("SELECT * FROM dose_log WHERE medication_id = ? ORDER BY taken_at DESC LIMIT 1").get(medId) as Row | undefined;
 }
 
-// CareCircle only knows about doses that were reported to it, so it never says a
+// CaringU only knows about doses that were reported to it, so it never says a
 // dose is "safe". It reports what is recorded and points to a pharmacist when in doubt.
-export const RECORD_BASIS = "Based only on doses reported to CareCircle; doses that were not reported are unknown.";
+export const RECORD_BASIS = "Based only on doses reported to CaringU; doses that were not reported are unknown.";
 export const MISSED_DOSE_GUIDANCE = "Do not take two doses together to make up. Whether a late dose should still be taken depends on the medicine: ask the pharmacist or doctor.";
 
 export function doseStatus(db: DB, ref: string, now: Date) {
@@ -271,7 +271,7 @@ export function proposeRefill(db: DB, now: Date, ref: string, quantity?: number,
   const qty = quantity ?? m.times.length * m.pills_per_dose * 30;
   if (!Number.isInteger(qty) || qty < 1 || qty > 180) throw new ToolError("INVALID_QUANTITY", "Quantity must be 1-180.");
   return propose(db, now, { action: "request_refill", payload: { medication_id: m.id, quantity: qty, pharmacy } },
-    `Send a refill request for ${qty} × ${m.name} ${m.dose} to ${pharmacy}.`, { cost: "No payment is made by CareCircle." });
+    `Send a refill request for ${qty} × ${m.name} ${m.dose} to ${pharmacy}.`, { cost: "No payment is made by CaringU." });
 }
 
 export function proposeAppointment(db: DB, now: Date, a: { title: string; starts_at: string; location?: string; with_whom?: string; transport?: string; notes?: string }) {
@@ -415,7 +415,7 @@ export function respondToAlert(db: DB, now: Date, alertId: string, responder: st
 export function sendMessageToElder(db: DB, now: Date, from: string, text: string, photoId?: string) {
   const name = from.split(" ")[0];
   return { ...family.sendToElder(db, now, name, `${photoId ? `${name} shared a photo` : `Message from ${name}`}: ${text}`, undefined, photoId),
-    delivery: photoId ? "shown and read aloud on her CareCircle speaker" : "spoken aloud on her CareCircle device" };
+    delivery: photoId ? "shown and read aloud on her CaringU speaker" : "spoken aloud on her CaringU device" };
 }
 
 export function getAnnouncements(db: DB, now: Date) {
@@ -453,7 +453,7 @@ export function notifyFamily(db: DB, now: Date, message: string, severity: "info
   const caregivers = db.prepare("SELECT name, relation FROM people WHERE role='caregiver'").all() as Row[];
   const a = raiseAlert(db, now, severity, "message_to_family", message);
   return { ...a, delivered_to_dashboard_of: caregivers.map((c) => `${c.name} (${c.relation})`),
-    channel: "CareCircle family dashboard (SMS/push delivery is not implemented in this demo)" };
+    channel: "CaringU family dashboard (SMS/push delivery is not implemented in this demo)" };
 }
 
 export function activityLog(db: DB, limit = 30) {

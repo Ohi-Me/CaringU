@@ -1,5 +1,5 @@
 #!/bin/bash
-# CareCircle on a single EC2 instance (Amazon Linux 2023, x86_64 or arm64).
+# CaringU on a single EC2 instance (Amazon Linux 2023, x86_64 or arm64).
 # Paste into "User data" when launching the instance. It installs Node 24, builds
 # the app, runs it as a systemd service on port 8787, and puts Caddy in front for
 # automatic HTTPS on https://<public-ip-with-dashes>.sslip.io (no domain needed).
@@ -8,7 +8,7 @@
 # arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0. No keys on disk.
 set -euxo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/Ohi-Me/CareCircle.git}"
+REPO_URL="${REPO_URL:-https://github.com/Ohi-Me/CaringU.git}"
 BRANCH="${BRANCH:-main}"
 NODE_VERSION="24.12.0"
 CADDY_VERSION="2.8.4"
@@ -20,44 +20,44 @@ dnf install -y git tar xz python3.11 python3.11-pip
 curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NARCH}.tar.xz" | tar -xJ -C /opt
 ln -sf /opt/node-v${NODE_VERSION}-linux-${NARCH}/bin/{node,npm,npx} /usr/local/bin/
 
-useradd --system --create-home --home-dir /opt/carecircle carecircle || true
-sudo -u carecircle git clone --depth 1 -b "$BRANCH" "$REPO_URL" /opt/carecircle/app
-cd /opt/carecircle/app/web && sudo -u carecircle npm ci && sudo -u carecircle npm run build
-cd /opt/carecircle/app/server && sudo -u carecircle npm ci --omit=dev
+useradd --system --create-home --home-dir /opt/caringu caringu || true
+sudo -u caringu git clone --depth 1 -b "$BRANCH" "$REPO_URL" /opt/caringu/app
+cd /opt/caringu/app/web && sudo -u caringu npm ci && sudo -u caringu npm run build
+cd /opt/caringu/app/server && sudo -u caringu npm ci --omit=dev
 # OpenCV 5 vision service (pinned; manylinux wheels exist for x86_64 and aarch64/Graviton)
-cd /opt/carecircle/app/vision && sudo -u carecircle python3.11 -m venv .venv && sudo -u carecircle .venv/bin/pip install -q -r requirements.txt
-mkdir -p /opt/carecircle/data/refs /opt/carecircle/data/photos && chown -R carecircle /opt/carecircle/data
+cd /opt/caringu/app/vision && sudo -u caringu python3.11 -m venv .venv && sudo -u caringu .venv/bin/pip install -q -r requirements.txt
+mkdir -p /opt/caringu/data/refs /opt/caringu/data/photos && chown -R caringu /opt/caringu/data
 
-cat >/etc/systemd/system/carecircle.service <<'UNIT'
+cat >/etc/systemd/system/caringu.service <<'UNIT'
 [Unit]
-Description=CareCircle (MCP server + agent + web)
+Description=CaringU (MCP server + agent + web)
 After=network-online.target
 [Service]
-User=carecircle
-WorkingDirectory=/opt/carecircle/app/server
-Environment=PORT=8787 DB_PATH=/opt/carecircle/data/carecircle.db WEB_DIST=/opt/carecircle/app/web/dist
+User=caringu
+WorkingDirectory=/opt/caringu/app/server
+Environment=PORT=8787 DB_PATH=/opt/caringu/data/caringu.db WEB_DIST=/opt/caringu/app/web/dist
 Environment=AGENT_MODE=bedrock AWS_REGION=us-east-1 BEDROCK_MODEL_ID=amazon.nova-pro-v1:0 NODE_NO_WARNINGS=1
-Environment=VISION_URL=http://127.0.0.1:8790 PHOTO_DIR=/opt/carecircle/data/photos
+Environment=VISION_URL=http://127.0.0.1:8790 PHOTO_DIR=/opt/caringu/data/photos
 ExecStart=/usr/local/bin/node --import tsx src/index.ts
 Restart=always
 [Install]
 WantedBy=multi-user.target
 UNIT
-mkdir -p /opt/carecircle/data && chown carecircle /opt/carecircle/data
-cat >/etc/systemd/system/carecircle-vision.service <<'UNIT'
+mkdir -p /opt/caringu/data && chown caringu /opt/caringu/data
+cat >/etc/systemd/system/caringu-vision.service <<'UNIT'
 [Unit]
-Description=CareCircle vision (OpenCV 5)
+Description=CaringU vision (OpenCV 5)
 After=network-online.target
 [Service]
-User=carecircle
-WorkingDirectory=/opt/carecircle/app/vision
-Environment=VISION_REFS_DIR=/opt/carecircle/data/refs
-ExecStart=/opt/carecircle/app/vision/.venv/bin/python -m uvicorn carecircle_vision.app:app --host 127.0.0.1 --port 8790
+User=caringu
+WorkingDirectory=/opt/caringu/app/vision
+Environment=VISION_REFS_DIR=/opt/caringu/data/refs
+ExecStart=/opt/caringu/app/vision/.venv/bin/python -m uvicorn caringu_vision.app:app --host 127.0.0.1 --port 8790
 Restart=always
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload && systemctl enable --now carecircle-vision carecircle
+systemctl daemon-reload && systemctl enable --now caringu-vision caringu
 
 # HTTPS via Caddy + sslip.io hostname derived from the public IP (IMDSv2).
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
@@ -77,4 +77,4 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload && systemctl enable --now caddy
-echo "CareCircle: https://${HOST}" > /etc/motd
+echo "CaringU: https://${HOST}" > /etc/motd

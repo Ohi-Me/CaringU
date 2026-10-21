@@ -1,6 +1,6 @@
-# CareCircle
+# CaringU
 
-**Ask before you act.** CareCircle is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a fall) and brings the family in, fast.
+**Ask before you act.** CaringU is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a fall) and brings the family in, fast.
 
 Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ track: a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) plus a simulated Alexa+-style experience whose web clients are real MCP clients.
 
@@ -25,11 +25,11 @@ Built for the *Build, Ship, Shape: Amazon Developer Hackathon 2026*, Alexa+ trac
 
 ### Strip check: the camera answers "did I take it?"
 
-CareCircle's records only know doses someone reported. The **strip check** adds evidence:
+CaringU's records only know doses someone reported. The **strip check** adds evidence:
 1. Asha holds a medicine **blister strip** up to the camera ("📷 Show a medicine strip").
 2. An **OpenCV 5** service identifies which registered medicine it is, or **refuses if unsure**. It never guesses.
 3. It counts full and empty cavities and returns an annotated photo.
-4. CareCircle **reconciles the count with the dose log** since the previous check:
+4. CaringU **reconciles the count with the dose log** since the previous check:
 
 | What the strip shows | What happens |
 |---|---|
@@ -73,7 +73,7 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 | Agent | **Amazon Bedrock** Converse API with tool use (default `amazon.nova-pro-v1:0`), or a transparent rule-based planner when no AWS credentials are configured |
 | Voice | Browser Web Speech API (speech recognition and synthesis, Chrome or Edge) |
 | Alexa / Echo | **Simulated.** An independent Alexa+-*style* web experience. **Not** connected to Alexa, an Echo device or the gated Alexa+ developer tools, which the FAQ says are not available to participants. |
-| People, pharmacy, notifications | **Sample data** (fictional people). Refills go to a simulated pharmacy. Family alerts and replies travel through the CareCircle dashboard and device; there is no SMS. No orders and no payments. |
+| People, pharmacy, notifications | **Sample data** (fictional people). Refills go to a simulated pharmacy. Family alerts and replies travel through the CaringU dashboard and device; there is no SMS. No orders and no payments. |
 
 ## Architecture
 
@@ -168,12 +168,12 @@ python scripts/eval_real.py data/raw --out ../docs/vision-eval.md   # real photo
 ## Privacy and safety
 
 - All people and data are fictional sample data. There is no real calendar, pharmacy, SMS or health record.
-- CareCircle is **not a medical device**. It gives no medical advice, never says a dose is safe, and always escalates red-flag symptoms. In an emergency, call 112 (India) or 911 (US).
+- CaringU is **not a medical device**. It gives no medical advice, never says a dose is safe, and always escalates red-flag symptoms. In an emergency, call 112 (India) or 911 (US).
 - The audit log truncates long free text. Secrets are read from the environment only, and `.env` is git-ignored.
 
 ## Known limitations and next steps
 
-- Family delivery goes to the CareCircle dashboard only. Real SMS or push (for example Amazon SNS) is next.
+- Family delivery goes to the CaringU dashboard only. Real SMS or push (for example Amazon SNS) is next.
 - One household, no authentication. A real deployment needs accounts and per-caregiver permissions.
 - The safety screens are transparent rules, chosen so they can be explained and audited. A model-based classifier could add recall, with the rules kept as a floor.
 - SQLite on a container's local disk resets when the container is redeployed. Use a managed database beyond a demo.
