@@ -46,7 +46,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --linen: #0F1D1C; --paper: #162827; --wash: #1D3331; --line: #2B4542;
     --ink: #E8F0EE; --ink-soft: #9DB2AE;
     --tulsi: #5CC2B8; --tulsi-soft: #1C3B39;
@@ -60,6 +60,19 @@
     --lift: 0 18px 40px -22px rgba(0, 0, 0, .7);
   }
 }
+:root[data-theme="dark"] {
+    --linen: #0F1D1C; --paper: #162827; --wash: #1D3331; --line: #2B4542;
+    --ink: #E8F0EE; --ink-soft: #9DB2AE;
+    --tulsi: #5CC2B8; --tulsi-soft: #1C3B39;
+    --haldi: #E9B04C; --haldi-soft: #3A2E15;
+    --sindoor: #FF8A80; --sindoor-soft: #3E1D1C;
+    --leaf: #7BD49B; --leaf-soft: #193526;
+    --fabric-a: #2C3F37; --fabric-b: #24352E;
+    --frame: #07120F;
+    --tint-sage: #1A2E28; --tint-mint: #17302C; --tint-cream: #2A2A1E; --tint-pistachio: #232D1E; --tint-moss: #1E2C22;
+    --on-accent: #08201E;
+    --lift: 0 18px 40px -22px rgba(0, 0, 0, .7);
+  }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--linen); }
@@ -145,7 +158,8 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
 .ask input { flex: 1; min-width: 0; font-size: var(--t-s); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { background: rgba(255,255,255,.55); color: var(--ink); font-weight: 400; font-size: var(--t-xs); min-height: 34px; padding: .4rem .7rem; text-align: left; }
-@media (prefers-color-scheme: dark) { .chip { background: rgba(0,0,0,.25); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip { background: rgba(0,0,0,.25); } }
+:root[data-theme="dark"] .chip { background: rgba(0,0,0,.25); }
 .history { font-size: var(--t-xs); } .history summary { cursor: pointer; font-weight: 700; }
 .history p { margin: .35rem 0; } .history .assistant { color: var(--ink-soft); }
 
@@ -155,7 +169,8 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
   width: 100%; max-width: 760px; border-radius: var(--r-object); padding: 10px;
   background: var(--frame); box-shadow: var(--lift);
 }
-@media (prefers-color-scheme: dark) { .phone { box-shadow: var(--lift), inset 0 0 0 1px var(--line); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .phone { box-shadow: var(--lift), inset 0 0 0 1px var(--line); } }
+:root[data-theme="dark"] .phone { box-shadow: var(--lift), inset 0 0 0 1px var(--line); }
 .phone-bar { display: flex; justify-content: center; padding: 4px 0 8px; }
 .phone-notch { width: 96px; height: 6px; border-radius: 6px; background: rgba(34,48,47,.25); }
 .phone-screen { background: var(--linen); border-radius: 26px; padding: 16px; min-height: 70vh; }
@@ -285,10 +300,17 @@ h2 { font-size: var(--t-m); line-height: 1.25; margin-bottom: .75rem; }
 .feature:nth-child(3n+2) { background: var(--tint-cream); }
 .feature:nth-child(3n+3) { background: var(--tint-mint); }
 .feature-art { width: 96px; height: 72px; border-radius: 16px; background: rgba(255,255,255,.6); display: grid; place-items: center; margin-bottom: 4px; }
-@media (prefers-color-scheme: dark) { .feature-art { background: rgba(0,0,0,.2); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .feature-art { background: rgba(0,0,0,.2); } }
+:root[data-theme="dark"] .feature-art { background: rgba(0,0,0,.2); }
 .feature-art svg { width: 88px; height: 66px; }
 .feature h3 { font-size: var(--t-m); margin: 0; }
 .feature p { margin: 0; }
 .feature-eg { font-size: var(--t-xs); color: var(--ink-soft); border-left: 3px solid var(--tulsi); padding-left: 10px; margin-top: auto !important; }
 @media (max-width: 1000px) { .feature-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px) { .feature-grid { grid-template-columns: 1fr; } }
+
+/* theme switch */
+.theme-switch { display: inline-flex; background: var(--wash); border-radius: 999px; padding: 3px; gap: 2px; }
+.theme-switch button { min-height: 30px; padding: .25rem .7rem; font-size: var(--t-xs); background: transparent; color: var(--ink-soft); border-radius: 999px; }
+.theme-switch button[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.features { margin: 4px 0 28px; }

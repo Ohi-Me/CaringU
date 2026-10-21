@@ -30,6 +30,15 @@ export default function App() {
   const [mode, setMode] = useState<ModeInfo | null>(null);
   const [tick, setTick] = useState(0);
   const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
+  // Theme: auto follows the device; light/dark are remembered on this device (storage may be unavailable).
+  const [theme, setTheme] = useState<"auto" | "light" | "dark">(() => {
+    try { const t = localStorage.getItem("cc-theme"); return t === "light" || t === "dark" ? t : "auto"; } catch { return "auto"; }
+  });
+  useEffect(() => {
+    if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("cc-theme", theme); } catch { /* private mode: keep it for this visit only */ }
+  }, [theme]);
   // A question the MCP server is asking the person on this device (elicitation), relayed by the agent.
   const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
   const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
@@ -223,11 +232,18 @@ export default function App() {
           </span>
           <span className="pill pill-muted">MCP 2025-11-25 · Streamable HTTP</span>
           {clock && <span className={`pill ${clock.simulated ? "pill-warn" : "pill-muted"}`} title={clock.now}>{clock.simulated ? "Demo time " : "Time "}{new Date(clock.now).toTimeString().slice(0, 5)}</span>}
+          <div className="theme-switch" role="group" aria-label="Colour theme">
+            {(["auto", "light", "dark"] as const).map((t) => (
+              <button key={t} aria-pressed={theme === t} onClick={() => setTheme(t)}>{t === "auto" ? "Auto" : t === "light" ? "Light" : "Dark"}</button>
+            ))}
+          </div>
           <button className="ghost" onClick={() => advance(3)} title="Move the demo clock forward 3 minutes (shows escalation)">+3 min</button>
           <button className="ghost" onClick={() => reset("10:00")} title="Reset sample data and start at 10:00">Reset demo (10:00)</button>
           <button className="ghost" onClick={() => reset()} title="Reset sample data using the real time">Reset (now)</button>
         </div>
       </header>
+
+      <Features />
 
       <nav className="mobile-tabs" role="tablist">
         <button role="tab" aria-selected={mobilePane === "echo"} onClick={() => setMobilePane("echo")}>Talk</button>
@@ -303,7 +319,6 @@ export default function App() {
           </div>
         </section>
       </main>
-      <Features />
       <footer className="foot">
         Not a medical device and not connected to Alexa or any Echo device. Emergency: call 112 (India) / 911 (US).
       </footer>
