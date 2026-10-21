@@ -97,15 +97,47 @@ export function respondToAlert(db: DB, now: Date, alertId: string, responder: st
   return { already: false, claimed_by: responder, action, message_to_elder: msg };
 }
 
-export function sendToElder(db: DB, now: Date, from: string, text: string, alertId?: string) {
+export function sendToElder(db: DB, now: Date, from: string, text: string, alertId?: string, photoId?: string) {
   const mid = `msg_${randomUUID().slice(0, 8)}`;
-  db.prepare("INSERT INTO messages (id, at, from_name, to_elder, text, alert_id) VALUES (?,?,?,?,?,?)").run(mid, now.toISOString(), from, 1, text, alertId ?? null);
-  return { message_id: mid, from, text, at: hhmm(now.toISOString()) };
+  db.prepare("INSERT INTO messages (id, at, from_name, to_elder, text, alert_id, photo_id) VALUES (?,?,?,?,?,?,?)")
+    .run(mid, now.toISOString(), from, 1, text, alertId ?? null, photoId ?? null);
+  return { message_id: mid, from, text, at: hhmm(now.toISOString()), photo: photoId ? `/api/vision/photo/${photoId}` : null };
 }
 
 export function pendingAnnouncements(db: DB) {
   return (db.prepare("SELECT * FROM messages WHERE to_elder=1 AND heard_at IS NULL ORDER BY at").all() as Row[])
-    .map((m) => ({ message_id: m.id, from: m.from_name, text: m.text, at: hhmm(m.at) }));
+    .map((m) => ({ message_id: m.id, from: m.from_name, text: m.text, at: hhmm(m.at), photo: m.photo_id ? `/api/vision/photo/${m.photo_id}` : null }));
+}
+
+// ---------------- daily check-in ----------------
+export const CHECKIN_BY = process.env.CHECKIN_BY ?? "11:00";
+const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Any message from her counts as being up and about today. */
+export function markActivity(db: DB, now: Date) {
+  const day = dayKey(now);
+  const row = db.prepare("SELECT * FROM activity WHERE day=?").get(day) as Row | undefined;
+  if (row?.first_at) db.prepare("UPDATE activity SET last_at=? WHERE day=?").run(now.toISOString(), day);
+  else if (row) db.prepare("UPDATE activity SET first_at=?, last_at=? WHERE day=?").run(now.toISOString(), now.toISOString(), day);
+  else db.prepare("INSERT INTO activity (day, first_at, last_at, nudged) VALUES (?,?,?,0)").run(day, now.toISOString(), now.toISOString());
+}
+
+export function checkinToday(db: DB, now: Date) {
+  const row = db.prepare("SELECT * FROM activity WHERE day=?").get(dayKey(now)) as Row | undefined;
+  return { checked_in: !!row?.first_at, first_at: row?.first_at ? hhmm(row.first_at) : null, last_at: row?.last_at ? hhmm(row.last_at) : null,
+    expected_by: CHECKIN_BY, nudged: !!row?.nudged };
+}
+
+/** If she hasn't said anything by CHECKIN_BY, send the family one gentle nudge (once per day). */
+export function runCheckins(db: DB, now: Date, raise: (msg: string) => void) {
+  const [h, m] = CHECKIN_BY.split(":").map(Number);
+  const deadline = new Date(now); deadline.setHours(h, m, 0, 0);
+  if (now < deadline) return false;
+  const day = dayKey(now);
+  if (db.prepare("SELECT 1 FROM activity WHERE day=?").get(day)) return false;
+  db.prepare("INSERT INTO activity (day, first_at, last_at, nudged) VALUES (?,NULL,NULL,1)").run(day);
+  raise(`Asha hasn't checked in today (nothing heard by ${CHECKIN_BY}). A quick call might be nice.`);
+  return true;
 }
 
 export function markHeard(db: DB, now: Date, ids: string[]) {

@@ -7,9 +7,9 @@ import { resolve } from "node:path";
 import { openDb } from "./db.js";
 import { buildMcpServer } from "./mcp.js";
 import { resetDemo } from "./seed.js";
-import { activityLog, type Clock } from "./care.js";
+import { activityLog, raiseAlert, type Clock } from "./care.js";
 import { agentRouter } from "./agent.js";
-import { runEscalations, syncKnownPeople } from "./family.js";
+import { markActivity, runCheckins, runEscalations, syncKnownPeople } from "./family.js";
 import { photoPath, savePhoto, visionHealth } from "./vision.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -83,6 +83,11 @@ app.post("/api/vision/photo", express.raw({ type: ["image/jpeg", "image/png"], l
     res.status(400).json({ ok: false, error: e?.message ?? "bad photo" });
   }
 });
+app.get("/api/vision/photo/:id", (req, res) => {
+  const p = photoPath(req.params.id);
+  if (!p) return res.status(404).end();
+  res.set("Cache-Control", "private, max-age=3600").type("jpeg").sendFile(p);
+});
 app.get("/api/vision/photo/:id/annotated", (req, res) => {
   const p = photoPath(req.params.id, true);
   if (!p) return res.status(404).end();
@@ -110,6 +115,11 @@ app.post("/api/reset", (req, res) => {
   resetDemo(db, clock());
   res.json({ ok: true, now: clock().toString(), simulated: offsetMs !== 0 });
 });
+// Anything she says counts as her daily check-in.
+app.post("/api/agent/chat", (req, _res, next) => {
+  if (/^asha/i.test(String(req.body?.speaker ?? "Asha"))) { try { markActivity(db, clock()); } catch (e) { console.error("[checkin]", e); } }
+  next();
+});
 app.use("/api/agent", agentRouter(`http://127.0.0.1:${PORT}/mcp`, clock));
 
 // ---- static web client (built by ../web) ----
@@ -121,5 +131,7 @@ if (existsSync(webDist)) {
 
 // Escalations also advance on their own, not only when someone reads the alerts.
 setInterval(() => { try { runEscalations(db, clock()); } catch (e) { console.error("[escalation]", e); } }, 15_000).unref();
+// Daily check-in: one gentle family nudge if she has not said anything by CHECKIN_BY.
+setInterval(() => { try { const now = clock(); runCheckins(db, now, (msg) => raiseAlert(db, now, "warning", "no_checkin", msg)); } catch (e) { console.error("[checkin]", e); } }, 30_000).unref();
 
 app.listen(PORT, () => console.log(`CareCircle on http://localhost:${PORT}  (MCP: /mcp)`));

@@ -412,8 +412,10 @@ export function respondToAlert(db: DB, now: Date, alertId: string, responder: st
   return r;
 }
 
-export function sendMessageToElder(db: DB, now: Date, from: string, text: string) {
-  return { ...family.sendToElder(db, now, from.split(" ")[0], `Message from ${from.split(" ")[0]}: ${text}`), delivery: "spoken aloud on her CareCircle device" };
+export function sendMessageToElder(db: DB, now: Date, from: string, text: string, photoId?: string) {
+  const name = from.split(" ")[0];
+  return { ...family.sendToElder(db, now, name, `${photoId ? `${name} shared a photo` : `Message from ${name}`}: ${text}`, undefined, photoId),
+    delivery: photoId ? "shown and read aloud on her CareCircle speaker" : "spoken aloud on her CareCircle device" };
 }
 
 export function getAnnouncements(db: DB, now: Date) {
@@ -440,6 +442,7 @@ export function familyDigest(db: DB, now: Date, date?: string) {
     wellbeing: wb,
     open_alerts: listAlerts(db, false, now),
     messages_to_her: family.recentMessages(db, 5),
+    checkin: family.checkinToday(db, now),
     upcoming_appointments: listAppointments(db, now, undefined, 7),
     refills_needed: forecastRefills(db, now, 7).filter((r) => r.needs_refill),
     people: db.prepare("SELECT id, name, role, relation FROM people").all(),

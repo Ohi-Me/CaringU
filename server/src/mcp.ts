@@ -205,10 +205,13 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
   }, (a, now) => care.respondToAlert(db, now, a.alert_id, a.responder, a.action, a.message));
 
   tool("send_message_to_elder", {
-    title: "Send a spoken message to her device",
-    description: "A caregiver sends a short message that her CareCircle device reads aloud (e.g. 'I'll visit at 6').",
-    input: { from: z.string().min(1).max(60), text: z.string().min(1).max(300) },
-  }, (a, now) => care.sendMessageToElder(db, now, a.from, a.text));
+    title: "Share a message or family moment with her",
+    description: "A caregiver sends a short message, optionally with a photo (a family moment), that her CareCircle speaker shows and reads aloud (e.g. 'Riya's first day at school!').",
+    input: {
+      from: z.string().min(1).max(60), text: z.string().min(1).max(300),
+      photo_id: z.string().regex(/^ph_[a-f0-9]{12}$/).optional().describe("Id returned by the photo upload"),
+    },
+  }, (a, now) => care.sendMessageToElder(db, now, a.from, a.text, a.photo_id));
 
   tool("get_announcements", {
     title: "Announcements waiting for her device", readOnly: true,

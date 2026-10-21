@@ -59,6 +59,12 @@ export function openDb(path: string): DB {
   addColumn(db, "alerts", "next_escalation_at", "TEXT");
   addColumn(db, "alerts", "claimed_by", "TEXT");                 // caregiver who said "I'm calling her" etc.
   addColumn(db, "alerts", "claimed_action", "TEXT");
+  // Family moments (photo with a message) and the daily check-in.
+  db.exec(`CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY, at TEXT NOT NULL, from_name TEXT NOT NULL, to_elder INTEGER NOT NULL DEFAULT 1,
+      text TEXT NOT NULL, alert_id TEXT, heard_at TEXT);
+    CREATE TABLE IF NOT EXISTS activity (day TEXT PRIMARY KEY, first_at TEXT, last_at TEXT, nudged INTEGER NOT NULL DEFAULT 0);`);
+  addColumn(db, "messages", "photo_id", "TEXT");
   db.exec(`
     CREATE TABLE IF NOT EXISTS alert_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id TEXT NOT NULL, at TEXT NOT NULL, event TEXT NOT NULL, detail TEXT
