@@ -43,6 +43,7 @@ export default function App() {
   const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
   const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
   const [stripImage, setStripImage] = useState<string | null>(null);
+  const [moment, setMoment] = useState<{ from: string; text: string; photo: string; at: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   deviceAskRef.current = deviceAsk;
   const recRef = useRef<any>(null);
@@ -81,6 +82,8 @@ export default function App() {
       const r = await callTool<any[]>("get_announcements", {}, true);
       if (!r.ok || !r.data.length) return;
       const msgs = r.data;
+      const withPhoto = msgs.filter((m) => m.photo);
+      if (withPhoto.length) setMoment(withPhoto[withPhoto.length - 1]);
       setTurns((ts) => [...ts, ...msgs.map((m) => ({ role: "assistant" as const, text: m.text }))]);
       trace({ source: "dashboard", kind: "announce", label: `Spoken on her device: ${msgs.map((m) => m.text).join(" ")}`, ok: true });
       speak(msgs.map((m) => m.text).join(" "));
@@ -238,6 +241,7 @@ export default function App() {
             ))}
           </div>
           <button className="ghost" onClick={() => advance(3)} title="Move the demo clock forward 3 minutes (shows escalation)">+3 min</button>
+          <button className="ghost" onClick={() => advance(60)} title="Move the demo clock forward 1 hour (shows the daily check-in nudge)">+1 h</button>
           <button className="ghost" onClick={() => reset("10:00")} title="Reset sample data and start at 10:00">Reset demo (10:00)</button>
           <button className="ghost" onClick={() => reset()} title="Reset sample data using the real time">Reset (now)</button>
         </div>
@@ -284,6 +288,12 @@ export default function App() {
               : <p className="reply muted">Hi Asha. Ask me about your medicines, appointments, or anything that worries you.</p>}
           </div>
 
+          {moment && (
+            <figure className="moment">
+              <img src={moment.photo} alt={`Photo shared by ${moment.from}`} />
+              <figcaption><b>From {moment.from}</b> {moment.text.replace(/^.*?shared a photo:\s*/, "")}</figcaption>
+            </figure>
+          )}
           {stripImage && <figure className="strip-result"><img src={stripImage} alt="Strip check: green circles are pills found, red are empty cavities" /><figcaption>OpenCV strip check: green = pill, red = empty</figcaption></figure>}
           <div className="camera-row">
             <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) showStrip(f); e.target.value = ""; }} />
@@ -428,7 +438,11 @@ function Family({ tick }: { tick: number }) {
         <Stat label="Missed" value={d.adherence.missed} tone={d.adherence.missed ? "warn" : undefined} />
         <Stat label="Adherence so far" value={pct === null ? "—" : `${pct}%`} tone={pct !== null && pct < 80 ? "warn" : undefined} />
         <Stat label="Open alerts" value={d.open_alerts.length} tone={d.open_alerts.some((a: any) => a.severity === "urgent") ? "urgent" : undefined} />
+        <Stat label={d.checkin?.checked_in ? "Checked in today" : `Not heard from yet (by ${d.checkin?.expected_by ?? "11:00"})`}
+          value={d.checkin?.checked_in ? d.checkin.first_at : "—"} tone={!d.checkin?.checked_in && d.checkin?.nudged ? "warn" : undefined} />
       </div>
+
+      <MomentCard me={me} />
 
       <StripCard busyKey={busy} setBusyKey={setBusy} />
 
@@ -513,6 +527,46 @@ async function downscale(file: File, maxSide: number): Promise<Blob> {
   c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
   c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
   return await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", 0.88));
+}
+
+/** Family moments: a photo and a few words, shown and read aloud on her speaker. */
+function MomentCard({ me }: { me: string }) {
+  const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const pick = useRef<HTMLInputElement>(null);
+  const share = async () => {
+    if (!text.trim()) return;
+    setBusy(true); setStatus(null);
+    try {
+      let photo_id: string | undefined;
+      if (file) {
+        const blob = await downscale(file, 1600);
+        const up = await fetch("/api/vision/photo", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob }).then((r) => r.json());
+        if (!up.ok) throw new Error(up.error);
+        photo_id = up.photo_id;
+      }
+      const r = await callTool("send_message_to_elder", { from: me, text: text.trim(), ...(photo_id ? { photo_id } : {}) });
+      if (!r.ok) throw new Error(r.error.message);
+      setStatus({ ok: true, text: `Sent. Asha's speaker will ${photo_id ? "show it and " : ""}read it out.` });
+      setText(""); setFile(null);
+    } catch (e: any) { setStatus({ ok: false, text: e?.message ?? String(e) }); }
+    setBusy(false);
+  };
+  return (
+    <div className="card moment-card">
+      <h2>Share a moment with Asha</h2>
+      <p className="muted small">A photo and a few words. Her speaker shows it and reads it out, and she can reply by voice.</p>
+      <div className="moment-row">
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Riya's first day at school!" aria-label="Message to Asha" />
+        <input ref={pick} type="file" accept="image/*" hidden onChange={(e) => { setFile(e.target.files?.[0] ?? null); e.target.value = ""; }} />
+        <button className="ghost" onClick={() => pick.current?.click()}>{file ? "Photo added" : "Add photo"}</button>
+        <button disabled={busy || !text.trim()} onClick={share}>{busy ? "Sending…" : "Send to Asha"}</button>
+      </div>
+      {status && <p className={status.ok ? "claimed" : "warn-text"}>{status.text}</p>}
+    </div>
+  );
 }
 
 function StripCard({ busyKey, setBusyKey }: { busyKey: string | null; setBusyKey: (k: string | null) => void }) {
