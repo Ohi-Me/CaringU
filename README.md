@@ -115,7 +115,7 @@ flowchart LR
   end
 ```
 
-### MCP tools (25)
+### MCP tools (29)
 
 | Area | Tools |
 |---|---|

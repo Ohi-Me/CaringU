@@ -203,7 +203,7 @@ function Home() {
             </li>
           ))}
         </ul>
-        <p className="muted">It also recognises emergency signs like a drooping face or chest pain, checks a medicine strip with the camera, and alerts Ravi first, then Neha if nobody answers in 3 minutes.</p>
+        <p className="muted">It also recognises emergency signs like a drooping face or chest pain, checks a medicine strip with the camera, pays approved bills through PayPal only within the limits the family set, and alerts Ravi first, then Neha if nobody answers in 3 minutes.</p>
       </section>
 
       <section className="closing">
@@ -943,7 +943,7 @@ const JUDGES: { id: string; name: string; tryIt: string[]; uses: string[]; measu
       "Tap \"I took my BP pill\", then \"I took another one\". The second report gets a question about an extra dose instead of a silent record.",
       "Ask \"Am I running low on any medicine?\" and accept the refill. The server itself asks for the yes (MCP elicitation) before anything is sent.",
     ],
-    uses: ["Amazon Bedrock (Nova Pro) through the Converse API with tool use", "An MCP server with 25 care tools (Streamable HTTP, sessions, elicitation) that an Alexa+ or any MCP client can call", "Fixed safety rules before and around the model, and a rule-based fallback when Bedrock is unavailable"],
+    uses: ["Amazon Bedrock (Nova Pro) through the Converse API with tool use", "An MCP server with 29 care tools (Streamable HTTP, sessions, elicitation) that an Alexa+ or any MCP client can call", "Fixed safety rules before and around the model, and a rule-based fallback when Bedrock is unavailable"],
     measured: "Amazon Bedrock passed 28 of 32 scripted cases, 24 of 24 held-out conversations and 15 of 15 scenarios. See How it was tested below for the caveats.",
     code: ["server/src/mcp.ts", "server/src/agent.ts", "server/src/screen.ts", "server/src/care.ts"],
   },
@@ -1034,8 +1034,8 @@ function About({ events }: { events: TraceEvent[] }) {
           <li><h3>Her speaker or the family app</h3><p>Voice in the browser (Web Speech API), or typing. The family app talks to the server directly.</p></li>
           <li><h3>Safety screen</h3><p>Fixed rules for emergencies and scams. Urgent cases are answered here, without the model.</p></li>
           <li><h3>Agent</h3><p>Amazon Bedrock (Nova Pro), or NVIDIA Nemotron on Nebius, with guards on every tool call. If the model fails, a rule-based planner answers.</p></li>
-          <li><h3>MCP server</h3><p>25 care tools over Streamable HTTP. Approvals are asked of the person through MCP elicitation.</p></li>
-          <li><h3>Care record</h3><p>Medicines, doses, appointments, alerts and messages in SQLite. Photos go to an OpenCV 5 service that reads QR codes and payment requests (Scam Lens), and recognises a medicine strip and counts the pills left.</p></li>
+          <li><h3>MCP server</h3><p>29 care tools over Streamable HTTP. Approvals are asked of the person through MCP elicitation.</p></li>
+          <li><h3>Care record and payments</h3><p>Medicines, doses, appointments, alerts and messages in SQLite. Payments go through PayPal (sandbox) only after the payment rules allow them. Photos go to an OpenCV 5 service that reads QR codes and payment requests (Scam Lens), and recognises a medicine strip and counts the pills left.</p></li>
         </ol>
         <p className="status small">
           Live now: <b>{model}</b>{mode?.model ? ` (${mode.model})` : ""}; MCP {health?.protocol ?? "offline"}; camera checks (OpenCV) {health?.vision?.ok ? "online" : "offline"}.
