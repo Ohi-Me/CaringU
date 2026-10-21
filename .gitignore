@@ -5,3 +5,6 @@ data/
 .env
 server.log
 *.log
+
+# Private notes (kept on the laptop, not published)
+notes/

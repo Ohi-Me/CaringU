@@ -86,7 +86,8 @@ for (const [i, c] of CASES.entries()) {
   history.push({ role: "user", text: c.say });
   const r = await chat(history);
   tokens.input += r.tokens.input; tokens.output += r.tokens.output;
-  mode = r.final?.mode ?? mode;
+  // Name the report after the provider, not the last reply's path (safety-screen, dose-check, ...).
+  if (["bedrock", "nebius", "rules"].includes(r.final?.mode)) mode = r.final.mode;
   toolLat.push(...r.toolMs);
   if (r.final?.total_ms) totalLat.push(r.final.total_ms);
   const reply: string = r.final?.text ?? r.final?.message ?? "";

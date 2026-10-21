@@ -18,7 +18,7 @@ Don't photograph your own UPI or bank QR codes. They contain your personal payme
 
 ## 2. Medicine strips (strip check)
 
-These photos are the evaluation dataset for the OpenCV competition. They're what proves the vision works on real strips, so follow the naming carefully. About **45–60 photos** total. The phone camera is fine.
+These photos are the evaluation dataset for the strip check. They're what proves the vision works on real strips, so follow the naming carefully. About **45–60 photos** total. The phone camera is fine.
 
 ## What to photograph
 
@@ -44,8 +44,8 @@ Example: `paracetamol_6of10_3.jpg` means 6 pills left out of 10 cavities, 3rd ph
 ## Please don't
 - Pop pills just for photos. Use the strips as they are.
 - Include anything personal: no prescriptions with names, bills or addresses in the frame.
-- Use other people's photos from the internet (they'd break the competition's data-rights rule).
+- Use other people's photos from the internet (we need photos we have the rights to).
 
 ## Where to put them
-Copy them to **`D:\Hackathon\A_Dev_DevPost\vision\data\raw\`** on the laptop (WhatsApp/Drive to yourself, then save there), then tell me.
+Copy them to **`vision/data/raw/`** in the project folder (WhatsApp/Drive to yourself, then save there), then tell me.
 I'll check every label by looking at each photo, and ask you about any I'm unsure of.

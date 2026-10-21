@@ -2,7 +2,7 @@
 
 **Ask before you act.** CaringU is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a QR code that "pays you a refund", a fall) and brings the family (her *care circle*) in, fast.
 
-One product, entered in four contests (see [docs/WIN-PLAN.md](docs/WIN-PLAN.md)): the *Amazon Developer Hackathon* (Alexa+ track), the *OpenCV AI Competition 2026*, the *Nebius x NVIDIA Global AI Hackathon* and the *PayPal AI Hackathon*. At its core is a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) plus an Alexa+-style experience whose web clients are real MCP clients.
+At its core is a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) and a voice experience whose clients are real MCP clients. Around it: **Amazon Bedrock** or **NVIDIA Nemotron** (on Nebius) for conversation, **OpenCV 5** for the camera checks, and **PayPal** (sandbox) for bill payments. Every decision that could hurt someone is made by fixed, tested rules, not by a model.
 
 ## The problem
 
@@ -84,18 +84,18 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 4. **Family in the loop, with a deadline.** Urgent alerts follow an escalation ladder (Ravi → Neha → tell her to call 112), driven by a reproducible clock and fully tested.
 5. **Transparent.** The **MCP trace** tab shows every JSON-RPC step: initialize, tools/list, each tools/call with its latency, the safety screen verdict, elicitation questions and answers, and guard blocks. The server keeps an audit log (long free text is truncated).
 
-## Alexa+ track: what is real and what is simulated
+## What is real and what is simulated
 
 | | Status |
 |---|---|
 | MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 29 tools. |
-| Vision | **Real.** OpenCV 5.0.0 service (Python, FastAPI), called by the MCP server. Unit and end-to-end tests use synthetic strips; real-photo accuracy is in [docs/vision-eval.md](docs/vision-eval.md). |
+| Vision | **Real.** OpenCV 5.0.0 service (Python, FastAPI), called by the MCP server. Scam Lens results: [docs/lens-eval.md](docs/lens-eval.md). Strip-check tests use generated strips. |
 | MCP clients | **Real.** (1) The agent (server side) runs `initialize`, `tools/list` and `tools/call`, and handles elicitation by relaying questions to the device. (2) The family dashboard is an MCP client in the browser with its own elicitation handler. |
 | State | **Real.** SQLite (Node's built-in `node:sqlite`). Changes persist and are verified by re-reading. |
-| Agent | **Amazon Bedrock** Converse API with tool use (default `amazon.nova-pro-v1:0`), or a transparent rule-based planner when no AWS credentials are configured |
+| Agent | **Amazon Bedrock** Converse API with tool use (default `amazon.nova-pro-v1:0`), or **NVIDIA Nemotron** on Nebius Token Factory (`AGENT_MODE=nebius`), or a transparent rule-based planner when neither is configured |
 | Voice | Browser Web Speech API (speech recognition and synthesis, Chrome or Edge) |
-| Alexa / Echo | **Simulated.** An independent Alexa+-*style* web experience. **Not** connected to Alexa, an Echo device or the gated Alexa+ developer tools, which the FAQ says are not available to participants. |
-| People, pharmacy, notifications | **Sample data** (fictional people). Refills go to a simulated pharmacy. Family alerts and replies travel through the CaringU dashboard and device; there is no SMS. No orders and no payments. |
+| Smart speaker | **Simulated.** A voice-first web experience in the style of a smart speaker. **Not** connected to Alexa or an Echo device. |
+| People, pharmacy, notifications | **Sample data** (fictional people). Refills go to a simulated pharmacy. Family alerts and replies travel through the CaringU dashboard and device; there is no SMS. Payments run in the PayPal **sandbox** only (no real money). |
 
 ## Architecture
 

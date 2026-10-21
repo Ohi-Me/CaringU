@@ -928,84 +928,48 @@ const SAFETY_LAYERS = [
 ] as const;
 
 const EVALS = [
-  { set: "Scripted cases", n: 32, bedrock: 28, nemotron: 29 },
+  { set: "Scripted cases", n: 32, bedrock: 31, nemotron: 29 },
   { set: "Held-out conversations", n: 24, bedrock: 24, nemotron: 21 },
   { set: "Scenario set", n: 15, bedrock: 15, nemotron: 14 },
 ];
 
 const GH = "https://github.com/Ohi-Me/CaringU/blob/main/";
-// Filled from docs/lens-eval.md (generated photos only; real-photo results are added when measured).
-const LENS_EVAL = "On 640 generated photos with controlled distance, blur, tilt, lighting and JPEG damage, the plain OpenCV call read 89.7% of codes and Scam Lens read 99.5%, with no wrong reads. The ladder helps most with glare (82.9% to 100%) and very distant codes (74.5% to 99.3%). Generated photos measure robustness, not real-world accuracy; real phone photos are reported separately in docs/lens-eval.md.";
-const JUDGES: { id: string; name: string; tryIt: string[]; uses: string[]; measured?: string; code: string[] }[] = [
-  {
-    id: "alexa", name: "Amazon Alexa+",
-    tryIt: [
-      "Open Try it and tap the bank OTP suggestion. The safety screen answers at once and Ravi's phone gets an urgent alert.",
-      "Tap \"I took my BP pill\", then \"I took another one\". The second report gets a question about an extra dose instead of a silent record.",
-      "Ask \"Am I running low on any medicine?\" and accept the refill. The server itself asks for the yes (MCP elicitation) before anything is sent.",
-    ],
-    uses: ["Amazon Bedrock (Nova Pro) through the Converse API with tool use", "An MCP server with 29 care tools (Streamable HTTP, sessions, elicitation) that an Alexa+ or any MCP client can call", "Fixed safety rules before and around the model, and a rule-based fallback when Bedrock is unavailable"],
-    measured: "Amazon Bedrock passed 28 of 32 scripted cases, 24 of 24 held-out conversations and 15 of 15 scenarios. See How it was tested below for the caveats.",
-    code: ["server/src/mcp.ts", "server/src/agent.ts", "server/src/screen.ts", "server/src/care.ts"],
-  },
-  {
-    id: "opencv", name: "OpenCV AI Competition",
-    tryIt: [
-      "Under Asha's speaker, tap a sample: the \"You won ₹5,000\" flyer, the bank KYC message or the pharmacy bill.",
-      "Watch Ravi's phone. A scam code raises an urgent alert and blocks the payee; the pharmacy bill only gets a reminder that paying sends money.",
-      "Show a medicine strip. OpenCV identifies which medicine it is, counts the pills left and compares that with the dose record.",
-    ],
-    uses: ["Scam Lens: cv2.QRCodeDetector and cv2.QRCodeDetectorAruco over a ladder of views (contrast equalised, upscaled, sharpened, binarised), plus a blur and lighting check that asks for a better photo instead of guessing",
-      "Strip check: SIFT features, FLANN matching and USAC_MAGSAC homography to identify the strip, warpPerspective, HoughCircles and k-means on the cavity grid, Lab colour per cavity",
-      "Agentic vision: the vision result decides the next action (alert the family, block a payee, or ask her before recording a dose)"],
-    measured: LENS_EVAL,
-    code: ["vision/carecircle_vision/lens.py", "vision/carecircle_vision/strip.py", "server/src/lens.ts", "vision/scripts/eval_lens.py"],
-  },
-  {
-    id: "paypal", name: "PayPal",
-    tryIt: [
-      "On Asha's speaker, tap \"Pay the pharmacy 12.50 dollars for my Amlodipine refill\". It is an approved payee within its limit, so the server asks her for a yes and then pays through PayPal (sandbox).",
-      "Say \"Pay the pharmacy 40 dollars for three months of medicine\". It is over the $25 limit, so it waits on Ravi's phone under Payments with the reason; approve it there and finish in PayPal.",
-      "Tap the \"You won ₹5,000\" flyer first, then ask to pay Prize Desk: Scam Lens blocked that payee, so the payment is refused and the family is told.",
-    ],
-    uses: ["PayPal REST APIs in the sandbox: OAuth client credentials, Orders v2 (create and capture), Vault v3 (setup token, then payment token) so the family links PayPal once",
-      "Fixed payment rules before any money moves: approved payees, per-payment and daily limits, payees blocked by Scam Lens, and a hold while a scam alert is unanswered",
-      "Agentic commerce with a human in the loop: the agent (Bedrock or Nemotron) calls pay_bill; her yes arrives by MCP elicitation, the family's approval in the app, and the model never decides"],
-    measured: "62 automated server tests, including Safe Pay against a mock PayPal sandbox: paid on her yes within limits, family approval above limits, refusal for blocked payees, and nothing paid without keys.",
-    code: ["server/src/pay.ts", "server/test/pay.test.ts", "server/src/lens.ts", "server/src/mcp.ts"],
-  },
-  {
-    id: "nvidia", name: "NVIDIA Nemotron on Nebius",
-    tryIt: [
-      "Set AGENT_MODE=nebius and NEBIUS_API_KEY in .env, then npm start in server/. The same app now runs on Nemotron.",
-      "On Ravi's phone, find This week and tap Write it up with AI. Nemotron 3 Ultra writes the weekly update from the record, and a grounding check rejects it if it states any number that isn't there.",
-      "In Nebius mode, tap the \"You won ₹5,000\" flyer sample: the trace shows the words Nemotron VL read next to what OpenCV decoded.",
-      "Run npm run eval in server/ to repeat the scripted evaluation against Nemotron.",
-    ],
-    uses: ["Model routing: NVIDIA Nemotron 3 Super for everyday conversation with tool calling; Nemotron 3 Ultra only for the weekly review, the one task that reasons over a week of records",
-      "Nemotron 3.5 Super VL in Scam Lens: it reads the printed words around a QR code (\"You won… scan to RECEIVE\"), and the fixed rules use those words as evidence. The model never gives the verdict",
-      "Nebius Token Factory (OpenAI-compatible API); token use and time are shown with each written review",
-      "The same guards as Bedrock: fixed safety screen, dose check, refill guard and the action-claim check; plus the grounding check on the weekly review"],
-    measured: "Nemotron passed 29 of 32 scripted cases, 21 of 24 held-out conversations and 14 of 15 scenarios.",
-    code: ["server/src/nemotron.ts", "server/src/review.ts", "server/src/agent.ts", "docs/evaluation-nebius.md"],
-  },
+// Each part of CaringU by the job it does: which technology, what it is allowed to decide, and the evidence.
+const PARTS: { job: string; tech: string; does: string; evidence: string; code: string }[] = [
+  { job: "Understanding what she says", tech: "Amazon Bedrock (Nova Pro) · NVIDIA Nemotron 3 Super on Nebius",
+    does: "Turns her words into the right action and a short, kind reply. It chooses tools; it never approves anything, and every tool call is checked by fixed rules first.",
+    evidence: "Run on both models with the same tests: see How it was tested below.", code: "server/src/agent.ts" },
+  { job: "Doing things safely", tech: "Model Context Protocol server (29 tools)",
+    does: "Every action is a small tool with checked inputs and an audit log. Refills, appointment changes and payments ask the person for a yes through MCP elicitation, so the AI can't say yes for her.",
+    evidence: "Automated tests speak raw JSON-RPC to it, including sessions and approvals.", code: "server/src/mcp.ts" },
+  { job: "Seeing what she sees", tech: "OpenCV 5",
+    does: "Scam Lens reads a QR code or payment request; the strip check recognises a medicine strip and counts the pills left. OpenCV reports what it sees; fixed rules decide what that means.",
+    evidence: "On 640 test photos with blur, glare, distance and tilt, Scam Lens read 99.5% of codes (a plain OpenCV call read 89.7%), with no wrong reads.", code: "vision/carecircle_vision/lens.py" },
+  { job: "Reading the small print", tech: "NVIDIA Nemotron 3.5 Super VL",
+    does: "Reads the words printed around a code (\"You won… scan to RECEIVE\"). The words are extra evidence for the scam rules: they can make a warning stronger, never clear one.",
+    evidence: "Automated tests cover a prize flyer, a fake KYC message and a genuine pharmacy bill.", code: "server/src/lens.ts" },
+  { job: "Paying bills without being tricked", tech: "PayPal (sandbox): Orders v2 and Vault",
+    does: "She can pay approved payees within the limits her family set. A new payee or a larger amount waits for Ravi; a payee Scam Lens flagged is refused. PayPal moves the money only after that.",
+    evidence: "Automated tests cover paying on her yes, family approval above the limit, and refusal of a blocked payee.", code: "server/src/pay.ts" },
+  { job: "Keeping the family in the loop", tech: "NVIDIA Nemotron 3 Ultra · Amazon Bedrock",
+    does: "Writes a short weekly update from the record. Fixed code gathers the facts; the model only words them, and a check rejects any number that isn't in the record.",
+    evidence: "A test review that invented a number was rejected and the plain version was shown instead.", code: "server/src/review.ts" },
 ];
 
-function ForJudges() {
-  const [tab, setTab] = useState(JUDGES[0].id);
-  const j = JUDGES.find((x) => x.id === tab)!;
+function Parts() {
   return (
-    <section className="judges" aria-labelledby="judges-title">
-      <h2 id="judges-title">For judges</h2>
-      <p className="muted">Pick your contest: what to try, what it uses, what was measured and where the code is.</p>
-      <div className="judge-tabs" role="tablist" aria-label="Contest">
-        {JUDGES.map((x) => <button key={x.id} role="tab" aria-selected={tab === x.id} onClick={() => setTab(x.id)}>{x.name}</button>)}
-      </div>
-      <div className="judge-panel" role="tabpanel" aria-label={j.name}>
-        <div><h3>Try this</h3><ol>{j.tryIt.map((t) => <li key={t}>{t}</li>)}</ol></div>
-        <div><h3>What it uses</h3><ul>{j.uses.map((t) => <li key={t}>{t}</li>)}</ul></div>
-        {j.measured && <div><h3>Measured</h3><p>{j.measured}</p></div>}
-        <div><h3>Read the code</h3><ul className="code-links">{j.code.map((c) => <li key={c}><a href={GH + c} target="_blank" rel="noreferrer">{c}</a></li>)}</ul></div>
+    <section aria-labelledby="parts-title">
+      <h2 id="parts-title">What each part does, and how we know it works</h2>
+      <div className="parts">
+        {PARTS.map((p) => (
+          <article key={p.job} className="part">
+            <h3>{p.job}</h3>
+            <p className="part-tech">{p.tech}</p>
+            <p>{p.does}</p>
+            <p className="part-evidence">{p.evidence}</p>
+            <a className="small" href={GH + p.code} target="_blank" rel="noreferrer">Read the code</a>
+          </article>
+        ))}
       </div>
     </section>
   );
@@ -1027,8 +991,6 @@ function About({ events }: { events: TraceEvent[] }) {
         <p className="lead">A language model handles the conversation. Everything that could hurt someone, like a double dose, a scam or a missed emergency, is decided by fixed code that is tested on its own.</p>
       </section>
 
-      <ForJudges />
-
       <section aria-labelledby="flow-title">
         <h2 id="flow-title">From her words to a safe answer</h2>
         <ol className="flow">
@@ -1042,6 +1004,8 @@ function About({ events }: { events: TraceEvent[] }) {
           Live now: <b>{model}</b>{mode?.model ? ` (${mode.model})` : ""}; MCP {health?.protocol ?? "offline"}; camera checks (OpenCV) {health?.vision?.ok ? "online" : "offline"}.
         </p>
       </section>
+
+      <Parts />
 
       <section aria-labelledby="safety-title">
         <h2 id="safety-title">Safety is fixed code, not AI</h2>
@@ -1058,7 +1022,7 @@ function About({ events }: { events: TraceEvent[] }) {
             {EVALS.map((e) => <tr key={e.set}><th scope="row">{e.set}</th><td>{e.bedrock} of {e.n}</td><td>{e.nemotron} of {e.n}</td></tr>)}
           </tbody>
         </table>
-        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 62 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in the OpenCV tab above.</p>
+        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 62 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in docs/lens-eval.md.</p>
       </section>
 
       <section id="trace" aria-labelledby="trace-title">
@@ -1068,7 +1032,7 @@ function About({ events }: { events: TraceEvent[] }) {
 
       <section className="builder" aria-labelledby="builder-title">
         <h2 id="builder-title">Who built it</h2>
-        <p>Built by <b>Rohit Kumar</b>, solo, for the Amazon Developer hackathon (Alexa+ track).</p>
+        <p>Designed and built by <b>Rohit Kumar</b>.</p>
         <p><a href="https://github.com/Ohi-Me/CaringU" target="_blank" rel="noreferrer">Source code on GitHub</a></p>
       </section>
     </main>
