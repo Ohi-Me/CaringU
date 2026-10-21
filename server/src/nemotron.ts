@@ -7,10 +7,10 @@ import type { ScreenOutcome } from "./screen.js";
 
 export const NEBIUS = {
   base: (process.env.NEBIUS_BASE_URL ?? "https://api.tokenfactory.nebius.com/v1").replace(/\/$/, ""),
-  // Model ids are configurable because availability differs per account; /api/agent/mode checks them against /models.
+  // Verified against Token Factory /models on 2026-10-21; configurable because availability differs per account.
   fast: process.env.NEBIUS_MODEL_FAST ?? "nvidia/nemotron-3-super-120b-a12b",
-  reason: process.env.NEBIUS_MODEL_REASON ?? "nvidia/nemotron-3-ultra-550b-a55b",
-  vision: process.env.NEBIUS_MODEL_VISION ?? "nvidia/nemotron-3-nano-omni",
+  reason: process.env.NEBIUS_MODEL_REASON ?? "nvidia/Nemotron-3-Ultra-550b-a55b",
+  vision: process.env.NEBIUS_MODEL_VISION ?? "nvidia/Nemotron-3.5-Super-VL",
 };
 const key = () => process.env.NEBIUS_API_KEY?.trim() || "";
 const MAX_STEPS = 8;
