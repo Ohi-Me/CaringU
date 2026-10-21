@@ -76,7 +76,7 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 
 | | Status |
 |---|---|
-| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 24 tools. |
+| MCP server | **Real.** `@modelcontextprotocol/sdk` 1.32.1, protocol **2025-11-25**, **Streamable HTTP** at `/mcp`. Session-based (`Mcp-Session-Id`, GET/DELETE per spec), with SSE responses so the server can send elicitation requests mid-call. 25 tools. |
 | Vision | **Real.** OpenCV 5.0.0 service (Python, FastAPI), called by the MCP server. Unit and end-to-end tests use synthetic strips; real-photo accuracy is in [docs/vision-eval.md](docs/vision-eval.md). |
 | MCP clients | **Real.** (1) The agent (server side) runs `initialize`, `tools/list` and `tools/call`, and handles elicitation by relaying questions to the device. (2) The family dashboard is an MCP client in the browser with its own elicitation handler. |
 | State | **Real.** SQLite (Node's built-in `node:sqlite`). Changes persist and are verified by re-reading. |
@@ -103,7 +103,7 @@ flowchart LR
   end
 ```
 
-### MCP tools (24)
+### MCP tools (25)
 
 | Area | Tools |
 |---|---|
@@ -112,7 +112,7 @@ flowchart LR
 | Approvals | `confirm_action` (fallback for clients without elicitation) |
 | Safety | `log_wellbeing`, `assess_scam_risk` |
 | Camera | `check_code_with_camera` (Scam Lens), `inspect_medicine_strip`‡, `register_medicine_strip`, `list_strip_checks` |
-| Family loop | `notify_family`, `list_alerts`, `acknowledge_alert`, `respond_to_alert`, `send_message_to_elder`, `get_announcements`, `mark_announcements_heard`, `get_family_digest` |
+| Family loop | `get_weekly_review`, `notify_family`, `list_alerts`, `acknowledge_alert`, `respond_to_alert`, `send_message_to_elder`, `get_announcements`, `mark_announcements_heard`, `get_family_digest` |
 
 † Approved by a human through MCP elicitation, or through `confirm_action` for clients that can't elicit.
 ‡ Records an unlogged dose only after the person confirms it through elicitation.
@@ -160,7 +160,7 @@ Use the returned `Mcp-Session-Id` header on later requests. Declare `"capabiliti
 
 ```bash
 cd server
-npm test          # 50 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
+npm test          # 54 tests: domain rules, safety screens, escalation, raw JSON-RPC + sessions, SDK client, elicitation,
                   #           model-fallback regressions, Scam Lens rules, end-to-end strip check and Scam Lens (Node -> OpenCV)
 npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (server running)
 npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)

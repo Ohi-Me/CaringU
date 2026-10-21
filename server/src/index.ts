@@ -11,6 +11,7 @@ import { activityLog, raiseAlert, type Clock } from "./care.js";
 import { agentRouter } from "./agent.js";
 import { markActivity, runCheckins, runEscalations, syncKnownPeople } from "./family.js";
 import { photoPath, savePhoto, visionHealth } from "./vision.js";
+import { templateReview, weeklyFacts, writeReview } from "./review.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
@@ -114,6 +115,20 @@ app.post("/api/reset", (req, res) => {
   } else offsetMs = 0;
   resetDemo(db, clock());
   res.json({ ok: true, now: clock().toString(), simulated: offsetMs !== 0 });
+});
+// Weekly care review: facts from fixed code; ?write=1 asks the configured model to write it up
+// (grounding-checked). Writing costs tokens, so it runs only on request and at most every 20 s.
+let lastWrite = 0;
+app.get("/api/review/weekly", async (req, res) => {
+  try {
+    const facts = weeklyFacts(db, clock());
+    if (req.query.write !== "1") return res.json({ ok: true, facts, review: templateReview(facts), written_by: "template" });
+    if (Date.now() - lastWrite < 20_000) return res.status(429).json({ ok: false, error: "A review was just written; try again in a few seconds." });
+    lastWrite = Date.now();
+    res.json({ ok: true, facts, ...(await writeReview(facts)) });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message ?? "review failed" });
+  }
 });
 // Anything she says counts as her daily check-in.
 app.post("/api/agent/chat", (req, _res, next) => {

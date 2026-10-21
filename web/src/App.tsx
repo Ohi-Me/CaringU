@@ -639,6 +639,8 @@ function Family({ tick }: { tick: number }) {
 
       <StripCard busyKey={busy} setBusyKey={setBusy} />
 
+      <WeekCard tick={tick} />
+
       {ov.pending_confirmations.length > 0 && (
         <div className="card">
           <h2>Waiting for a yes</h2>
@@ -723,6 +725,41 @@ async function downscale(file: File, maxSide: number): Promise<Blob> {
 }
 
 /** Family moments: a photo and a few words, shown and read aloud on her speaker. */
+// The week at a glance. Facts come from the record; "Write it up" asks the configured model
+// (Nemotron 3 Ultra on Nebius, or Bedrock) for a warm summary that must pass a grounding check.
+function WeekCard({ tick }: { tick: number }) {
+  const [w, setW] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { fetch("/api/review/weekly").then((r) => r.json()).then((x) => x.ok && setW((prev: any) => (prev?.written_by && prev.written_by !== "template" ? { ...prev, facts: x.facts } : x))).catch(() => {}); }, [tick]);
+  const write = async () => {
+    setBusy(true); setErr(null);
+    const r = await fetch("/api/review/weekly?write=1").then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (r.ok) setW(r); else setErr(r.error);
+    setBusy(false);
+  };
+  if (!w?.facts) return null;
+  const f = w.facts;
+  const by = w.model?.includes("Nemotron") ? `NVIDIA ${w.model.split("/").pop()}` : w.model ? `Amazon Bedrock (${w.model})` : "";
+  const tokens = (w.usage?.input_tokens ?? 0) + (w.usage?.output_tokens ?? 0);
+  return (
+    <div className="card week">
+      <h2>This week</h2>
+      <div className="week-stats">
+        <span><b>{f.medicines.adherence_pct ?? "—"}%</b> doses taken</span>
+        <span><b>{f.alerts.scams_stopped}</b> {f.alerts.scams_stopped === 1 ? "scam" : "scams"} stopped</span>
+        <span><b>{f.check_ins.days_heard_from}/7</b> days heard from</span>
+      </div>
+      <p className="week-text">{w.review}</p>
+      <p className="small muted">{w.written_by === "template"
+        ? (w.reason ?? "Plain summary from the record.")
+        : `Written by ${by} from the record. Every number was checked against it. ${tokens} tokens, ${(w.ms / 1000).toFixed(1)} s.`}</p>
+      <div className="btns"><button className="ghost" onClick={write} disabled={busy}>{busy ? "Writing…" : "Write it up with AI"}</button></div>
+      {err && <p className="small warn-text">{err}</p>}
+    </div>
+  );
+}
+
 function MomentCard({ me }: { me: string }) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -847,7 +884,7 @@ const JUDGES: { id: string; name: string; tryIt: string[]; uses: string[]; measu
       "Tap \"I took my BP pill\", then \"I took another one\". The second report gets a question about an extra dose instead of a silent record.",
       "Ask \"Am I running low on any medicine?\" and accept the refill. The server itself asks for the yes (MCP elicitation) before anything is sent.",
     ],
-    uses: ["Amazon Bedrock (Nova Pro) through the Converse API with tool use", "An MCP server with 24 care tools (Streamable HTTP, sessions, elicitation) that an Alexa+ or any MCP client can call", "Fixed safety rules before and around the model, and a rule-based fallback when Bedrock is unavailable"],
+    uses: ["Amazon Bedrock (Nova Pro) through the Converse API with tool use", "An MCP server with 25 care tools (Streamable HTTP, sessions, elicitation) that an Alexa+ or any MCP client can call", "Fixed safety rules before and around the model, and a rule-based fallback when Bedrock is unavailable"],
     measured: "Amazon Bedrock passed 28 of 32 scripted cases, 24 of 24 held-out conversations and 15 of 15 scenarios. See How it was tested below for the caveats.",
     code: ["server/src/mcp.ts", "server/src/agent.ts", "server/src/screen.ts", "server/src/care.ts"],
   },
@@ -868,11 +905,14 @@ const JUDGES: { id: string; name: string; tryIt: string[]; uses: string[]; measu
     id: "nvidia", name: "NVIDIA Nemotron on Nebius",
     tryIt: [
       "Set AGENT_MODE=nebius and NEBIUS_API_KEY in .env, then npm start in server/. The same app now runs on Nemotron.",
+      "On Ravi's phone, find This week and tap Write it up with AI. Nemotron 3 Ultra writes the weekly update from the record, and a grounding check rejects it if it states any number that isn't there.",
       "Run npm run eval in server/ to repeat the scripted evaluation against Nemotron.",
     ],
-    uses: ["NVIDIA Nemotron 3 Super through Nebius Token Factory (OpenAI-compatible API) with tool calling", "The same guards as Bedrock: fixed safety screen, dose check, refill guard and the action-claim check"],
+    uses: ["Model routing: NVIDIA Nemotron 3 Super for everyday conversation with tool calling; Nemotron 3 Ultra only for the weekly review, the one task that reasons over a week of records",
+      "Nebius Token Factory (OpenAI-compatible API); token use and time are shown with each written review",
+      "The same guards as Bedrock: fixed safety screen, dose check, refill guard and the action-claim check; plus the grounding check on the weekly review"],
     measured: "Nemotron passed 29 of 32 scripted cases, 21 of 24 held-out conversations and 14 of 15 scenarios.",
-    code: ["server/src/nemotron.ts", "server/src/agent.ts", "docs/evaluation-nebius.md"],
+    code: ["server/src/nemotron.ts", "server/src/review.ts", "server/src/agent.ts", "docs/evaluation-nebius.md"],
   },
 ];
 
@@ -920,7 +960,7 @@ function About({ events }: { events: TraceEvent[] }) {
           <li><h3>Her speaker or the family app</h3><p>Voice in the browser (Web Speech API), or typing. The family app talks to the server directly.</p></li>
           <li><h3>Safety screen</h3><p>Fixed rules for emergencies and scams. Urgent cases are answered here, without the model.</p></li>
           <li><h3>Agent</h3><p>Amazon Bedrock (Nova Pro), or NVIDIA Nemotron on Nebius, with guards on every tool call. If the model fails, a rule-based planner answers.</p></li>
-          <li><h3>MCP server</h3><p>24 care tools over Streamable HTTP. Approvals are asked of the person through MCP elicitation.</p></li>
+          <li><h3>MCP server</h3><p>25 care tools over Streamable HTTP. Approvals are asked of the person through MCP elicitation.</p></li>
           <li><h3>Care record</h3><p>Medicines, doses, appointments, alerts and messages in SQLite. Photos go to an OpenCV 5 service that reads QR codes and payment requests (Scam Lens), and recognises a medicine strip and counts the pills left.</p></li>
         </ol>
         <p className="status small">
@@ -943,7 +983,7 @@ function About({ events }: { events: TraceEvent[] }) {
             {EVALS.map((e) => <tr key={e.set}><th scope="row">{e.set}</th><td>{e.bedrock} of {e.n}</td><td>{e.nemotron} of {e.n}</td></tr>)}
           </tbody>
         </table>
-        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 50 automated tests cover the server without a model, including Scam Lens end to end. Camera results are in the OpenCV tab above.</p>
+        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 54 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in the OpenCV tab above.</p>
       </section>
 
       <section id="trace" aria-labelledby="trace-title">

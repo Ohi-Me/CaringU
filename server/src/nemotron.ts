@@ -73,6 +73,13 @@ export function routeModel(lastUser: string, speaker: string) {
 /** Reasoning models may emit <think>…</think>; only the answer is spoken. */
 export const stripThinking = (s: string) => s.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/^[\s\S]*<\/think>/i, "").trim();
 
+/** One plain completion (no tools), e.g. the weekly review written by Nemotron 3 Ultra. */
+export async function nemotronComplete(model: string, system: string, user: string, maxTokens = 800) {
+  const out = await post("/chat/completions", { model, temperature: 0.2, max_tokens: maxTokens,
+    messages: [{ role: "system", content: system }, { role: "user", content: user }] }, 90_000);
+  return { text: stripThinking(out.choices?.[0]?.message?.content ?? ""), usage: out.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined };
+}
+
 /**
  * Tool-calling loop. Tracks state-changing tool calls; if the provider fails after one,
  * the error carries `writes` so the caller won't let a fallback planner repeat them.

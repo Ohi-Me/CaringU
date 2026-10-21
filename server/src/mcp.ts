@@ -5,6 +5,7 @@ import * as care from "./care.js";
 import type { DB } from "./db.js";
 import * as vision from "./vision.js";
 import * as lens from "./lens.js";
+import * as review from "./review.js";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Local date YYYY-MM-DD; omit for today");
 const actor = z.string().min(1).max(60).optional().describe("Who is speaking, e.g. 'Asha (voice)' or 'Ravi (son)'");
@@ -269,6 +270,12 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
       rows: z.number().int().min(1).max(6).optional(),
     },
   }, (a) => vision.registerStrip(db, a.photo_id, a.medication, a.total_cavities, a.pills_in_strip, a.rows));
+
+  tool("get_weekly_review", {
+    title: "Weekly care review (family)", readOnly: true,
+    description: "The last 7 days from the record: doses taken and missed per medicine, extra doses, alerts (urgent, answered, scams stopped), wellbeing notes, days she was heard from, refills needed and appointments coming up, plus a plain summary. Use it when a caregiver asks how she has been this week.",
+    input: {},
+  }, (_a, now) => { const f = review.weeklyFacts(db, now); return { facts: f, summary: review.templateReview(f) }; });
 
   tool("check_code_with_camera", {
     title: "Scam Lens: check a QR code or payment request",

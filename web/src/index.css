@@ -416,3 +416,10 @@ h1, h2 { color: var(--heading); }
 .judge-panel p { color: var(--ink-soft); }
 .code-links { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: var(--t-xs); }
 @media (max-width: 760px) { .judge-panel { grid-template-columns: 1fr; padding: 16px; } }
+
+/* This week */
+.week-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.week-stats span { background: var(--sage-soft); border-radius: 999px; padding: .3rem .75rem; font-size: var(--t-xs); }
+.week-stats b { font-size: var(--t-s); color: var(--heading); }
+.week-text { line-height: 1.5; margin-bottom: 8px; white-space: pre-line; }
+.week .btns { margin-top: 8px; }
