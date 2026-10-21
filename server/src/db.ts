@@ -81,7 +81,17 @@ export function openDb(path: string): DB {
     CREATE TABLE IF NOT EXISTS lens_checks (
       id TEXT PRIMARY KEY, at TEXT NOT NULL, photo_id TEXT NOT NULL, verdict TEXT NOT NULL, summary TEXT, payee TEXT
     );
-    CREATE TABLE IF NOT EXISTS blocked_payees (payee TEXT PRIMARY KEY, reason TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS blocked_payees (payee TEXT PRIMARY KEY, reason TEXT NOT NULL, at TEXT NOT NULL, source TEXT NOT NULL);
+    -- Safe Pay: payees the family approved (with a per-payment limit), payments and their decisions, PayPal link state.
+    CREATE TABLE IF NOT EXISTS payees (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, paypal_email TEXT, per_payment_limit REAL NOT NULL, added_by TEXT NOT NULL, at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS payments (
+      id TEXT PRIMARY KEY, at TEXT NOT NULL, payee_id TEXT, payee_name TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL,
+      purpose TEXT NOT NULL, status TEXT NOT NULL, decision_reasons TEXT, requested_by TEXT NOT NULL, approved_by TEXT,
+      paypal_order_id TEXT, approve_url TEXT, capture_id TEXT, error TEXT, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
   return db;
 }
 

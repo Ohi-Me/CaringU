@@ -126,6 +126,15 @@ export async function ruleAgent(history: Turn[], speaker: string, call: CallTool
     return `Got it, ${d.medication} recorded at ${time(d.taken_at)}.${d.refill_warning ? ` By the way, you have ${d.refill_warning.split(": ")[1].replace(/\.$/, "")} left. Shall I prepare a refill request?` : ""}`;
   }
 
+  // ---- 4b. Pay a bill (Safe Pay): pay_bill's rules decide; this only reads what she asked for ----
+  const payAsk = /\bpay\s+(?:the\s+)?([a-z][a-z .'-]*?)\s*(?:(?:\$|₹|rs\.?|usd)?\s*(\d+(?:\.\d{1,2})?)\s*(?:dollars?|usd|rupees?)?)?(?:\s+for\s+(?:my\s+|the\s+)?(.+?))?[.?!]*$/i.exec(text);
+  if (payAsk && !/\b(how|did|have i|when)\b/i.test(lower)) {
+    const [, payee, amount, purpose] = payAsk;
+    if (!amount) return `How much should I pay ${payee.trim()}? Say, for example, "Pay the pharmacy 12 dollars for my refill".`;
+    const r = await call("pay_bill", { payee: payee.trim(), amount: Number(amount), purpose: purpose?.trim() || "a bill", requested_by: speaker });
+    return r.ok ? r.data.spoken : `I couldn't pay that: ${err(r)}`;
+  }
+
   // ---- 5. Refills ----
   if (/\b(refill|running (low|out)|almost out|nearly out|run out|few (pills|tablets) left|order (more|my)|pharmacy)\b/.test(lower) || (YES.test(lower) && /prepare a refill/i.test(prev))) {
     const fromPrev = /you have .*? left/i.test(prev) ? /(\w+) recorded at/i.exec(prev)?.[1] ?? null : null;

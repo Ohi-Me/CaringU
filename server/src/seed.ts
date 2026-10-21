@@ -8,7 +8,7 @@ const HOUR = 3_600_000;
 
 export function resetDemo(db: DB, now: Date) {
   tx(db, () => {
-    for (const t of ["activity", "strip_checks", "lens_checks", "blocked_payees", "dose_log", "refills", "pending_actions", "alert_events", "messages", "alerts", "wellbeing", "appointments", "medications", "people", "audit"])
+    for (const t of ["activity", "strip_checks", "lens_checks", "blocked_payees", "payments", "payees", "dose_log", "refills", "pending_actions", "alert_events", "messages", "alerts", "wellbeing", "appointments", "medications", "people", "audit"])
       db.exec(`DELETE FROM ${t}`);
 
     const person = db.prepare("INSERT INTO people (id, name, role, relation, phone, priority) VALUES (?,?,?,?,?,?)");
@@ -43,6 +43,11 @@ export function resetDemo(db: DB, now: Date) {
         }
       }
     }
+
+    // Safe Pay: payees Ravi approved, each with a per-payment limit (sandbox amounts in USD).
+    const payee = db.prepare("INSERT INTO payees (id, name, kind, paypal_email, per_payment_limit, added_by, at) VALUES (?,?,?,?,?,?,?)");
+    payee.run("payee_pharmacy", "Sharma Medicals", "pharmacy", process.env.PAYPAL_PAYEE_PHARMACY ?? null, 25, "Ravi", now.toISOString());
+    payee.run("payee_power", "City Power", "electricity", process.env.PAYPAL_PAYEE_UTILITY ?? null, 60, "Ravi", now.toISOString());
 
     const appt = db.prepare("INSERT INTO appointments (id, title, starts_at, location, with_whom, transport, notes) VALUES (?,?,?,?,?,?,?)");
     const tomorrow = new Date(now.getTime() + 24 * HOUR); tomorrow.setHours(10, 30, 0, 0);

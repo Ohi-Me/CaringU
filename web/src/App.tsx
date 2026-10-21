@@ -15,6 +15,7 @@ const SUGGESTIONS = [
   "I took my BP pill",
   "I took another one",
   "Am I running low on any medicine?",
+  "Pay the pharmacy 12.50 dollars for my Amlodipine refill",
   "My face feels strange and my words are coming out wrong",
   "Good morning, what do I need to do today?",
   "When is my next doctor appointment?",
@@ -639,6 +640,8 @@ function Family({ tick }: { tick: number }) {
 
       <StripCard busyKey={busy} setBusyKey={setBusy} />
 
+      <PaymentsCard me={me} tick={tick} />
+
       <WeekCard tick={tick} />
 
       {ov.pending_confirmations.length > 0 && (
@@ -725,6 +728,62 @@ async function downscale(file: File, maxSide: number): Promise<Blob> {
 }
 
 /** Family moments: a photo and a few words, shown and read aloud on her speaker. */
+// Safe Pay on the family's phone: approve what the rules sent to the family, finish PayPal
+// approvals, link a PayPal account once, and see every payment with the reason for its decision.
+const PAY_STATUS: Record<string, string> = { paid: "Paid", awaiting_family: "Needs your approval", awaiting_paypal: "Finish in PayPal",
+  refused: "Refused by the rules", declined: "Declined", cancelled: "Cancelled", failed: "Failed", awaiting_her_yes: "Asking her", no_answer: "No answer" };
+function PaymentsCard({ me, tick }: { me: string; tick: number }) {
+  const [p, setP] = useState<any>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const load = useCallback(async () => { const r = await callTool<any>("list_payments", { limit: 6 }, true); if (r.ok) setP(r.data); }, []);
+  useEffect(() => { load(); }, [load, tick]);
+  const decide = async (id: string, approve: boolean) => {
+    setBusy(id);
+    const r = await callTool<any>("decide_payment", { payment_id: id, approve, decided_by: me });
+    if (!r.ok) setNote(r.error.message);
+    else if (r.data.approve_url) window.open(r.data.approve_url, "_blank", "noopener");
+    await load(); setBusy(null);
+  };
+  const link = async () => {
+    setBusy("link");
+    const r = await fetch("/api/pay/link", { method: "POST" }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (r.ok && r.approve_url) window.open(r.approve_url, "_blank", "noopener"); else setNote(r.error ?? "PayPal link failed");
+    setBusy(null);
+  };
+  if (!p) return null;
+  const money = (n: number) => `${p.currency === "USD" ? "$" : p.currency + " "}${Number(n).toFixed(2)}`;
+  return (
+    <div className="card pay">
+      <h2>Payments</h2>
+      <p className="small muted">
+        Asha can pay {p.payees.map((x: any) => `${x.name} (up to ${money(x.per_payment_limit)})`).join(" and ")} by voice, at most {money(p.daily_limit)} a day.
+        Anything else waits for you. PayPal {p.paypal.environment}{p.paypal.configured ? "" : ", not configured yet"}.
+      </p>
+      {p.payments.length === 0 ? <p className="muted small">No payments yet.</p> : (
+        <ul className="pay-list">
+          {p.payments.map((x: any) => (
+            <li key={x.id} className={`ps-${x.status}`}>
+              <div className="pay-main"><b>{money(x.amount)}</b> to {x.payee} <span className="muted small">for {x.purpose} · {x.at.slice(-5)}</span></div>
+              <div className="pay-status small"><span className="tag">{PAY_STATUS[x.status] ?? x.status}</span> {x.reasons}</div>
+              {x.status === "awaiting_family" && (
+                <div className="btns"><button disabled={busy === x.id} onClick={() => decide(x.id, true)}>Approve</button><button className="ghost" disabled={busy === x.id} onClick={() => decide(x.id, false)}>Decline</button></div>
+              )}
+              {x.status === "awaiting_paypal" && x.approve_url && <a className="button" href={x.approve_url} target="_blank" rel="noreferrer">Pay in PayPal</a>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="btns">
+        {p.paypal.linked_account
+          ? <span className="small">Bills are paid from {p.paypal.linked_account}'s PayPal.</span>
+          : <button className="ghost" disabled={busy === "link" || !p.paypal.configured} onClick={link}>Link a PayPal account for Asha's bills</button>}
+      </div>
+      {note && <p className="small warn-text">{note}</p>}
+    </div>
+  );
+}
+
 // The week at a glance. Facts come from the record; "Write it up" asks the configured model
 // (Nemotron 3 Ultra on Nebius, or Bedrock) for a warm summary that must pass a grounding check.
 function WeekCard({ tick }: { tick: number }) {

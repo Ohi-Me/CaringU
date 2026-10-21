@@ -196,7 +196,7 @@ const EXTRA = /\b(another|again|extra|second|one more|twice|two)\b/i;
 const ACTION_CLAIM = /\bI(?:'ve| have)? (?:just |already |now )?(?:requested|sent|recorded|logged|booked|scheduled|cancell?ed|messaged|notified|ordered|prepared|confirmed)\b/i;
 
 // Tools that act on behalf of a caregiver; the older adult's own turns must not use them.
-const CAREGIVER_ONLY = new Set(["send_message_to_elder", "respond_to_alert", "acknowledge_alert"]);
+const CAREGIVER_ONLY = new Set(["send_message_to_elder", "respond_to_alert", "acknowledge_alert", "decide_payment", "add_payee"]);
 
 function guarded(call: CallTool, lastUser: string, emit: Emit, speaker = "Asha (voice)"): CallTool {
   return async (name, args) => {

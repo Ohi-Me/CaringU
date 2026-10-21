@@ -12,6 +12,7 @@ import { agentRouter } from "./agent.js";
 import { markActivity, runCheckins, runEscalations, syncKnownPeople } from "./family.js";
 import { photoPath, savePhoto, visionHealth } from "./vision.js";
 import { templateReview, weeklyFacts, writeReview } from "./review.js";
+import { captureReturned, finishLink, startLink } from "./pay.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
@@ -129,6 +130,21 @@ app.get("/api/review/weekly", async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message ?? "review failed" });
   }
+});
+// ---- Safe Pay: PayPal (sandbox) sends people back here after approving in PayPal ----
+const backToApp = (res: express.Response, note: string) => res.redirect(`/#/try?paypal=${encodeURIComponent(note)}`);
+app.get("/api/pay/return", async (req, res) => {
+  try { await captureReturned(db, clock(), String(req.query.token ?? "")); backToApp(res, "paid"); }
+  catch (e: any) { console.error("[pay]", e?.message); backToApp(res, "failed"); }
+});
+app.get("/api/pay/linked", async (req, res) => {
+  try { await finishLink(db, String(req.query.approval_token_id ?? req.query.token ?? "")); backToApp(res, "linked"); }
+  catch (e: any) { console.error("[pay]", e?.message); backToApp(res, "link-failed"); }
+});
+app.get("/api/pay/cancel", (_req, res) => backToApp(res, "cancelled"));
+app.post("/api/pay/link", async (_req, res) => {
+  try { res.json({ ok: true, ...(await startLink(db)) }); }
+  catch (e: any) { res.status(400).json({ ok: false, error: e?.message ?? "PayPal link failed" }); }
 });
 // Anything she says counts as her daily check-in.
 app.post("/api/agent/chat", (req, _res, next) => {

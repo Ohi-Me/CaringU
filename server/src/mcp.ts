@@ -6,6 +6,7 @@ import type { DB } from "./db.js";
 import * as vision from "./vision.js";
 import * as lens from "./lens.js";
 import * as review from "./review.js";
+import * as pay from "./pay.js";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Local date YYYY-MM-DD; omit for today");
 const actor = z.string().min(1).max(60).optional().describe("Who is speaking, e.g. 'Asha (voice)' or 'Ravi (son)'");
@@ -270,6 +271,31 @@ export function buildMcpServer(db: DB, clock: care.Clock) {
       rows: z.number().int().min(1).max(6).optional(),
     },
   }, (a) => vision.registerStrip(db, a.photo_id, a.medication, a.total_cavities, a.pills_in_strip, a.rows));
+
+  tool("pay_bill", {
+    title: "Safe Pay: pay a bill through PayPal",
+    description: "Pays an approved payee (e.g. the pharmacy) through PayPal. Fixed rules decide: within the payee's limit -> the server asks her for a yes (MCP elicitation) and pays; a new payee, a larger amount or over the daily limit -> waits for a family member to approve; a blocked payee or an unanswered scam alert -> refused. Returns a sentence to say to her. Never pay without calling this.",
+    input: { payee: z.string().min(2).max(80), amount: z.number().positive().max(500), purpose: z.string().min(2).max(120), requested_by: actor },
+  }, (a, now, ctx) => pay.payBill(db, now, a, a.requested_by ?? "Asha (voice)", ctx.confirm));
+
+  tool("decide_payment", {
+    title: "Approve or decline a payment (family)",
+    description: "A family member approves or declines a payment that is waiting for the family. The rules are checked again before any money moves.",
+    input: { payment_id: z.string().regex(/^pay_[a-f0-9]{8}$/), approve: z.boolean(), decided_by: z.string().min(1).max(60) },
+  }, (a, now) => pay.decidePayment(db, now, a.payment_id, a.approve, a.decided_by));
+
+  tool("list_payments", {
+    title: "Payments, payees and the PayPal link", readOnly: true,
+    description: "Approved payees with their limits, recent payments with their status and reasons, the daily limit and whether a family PayPal account is linked.",
+    input: { limit: z.number().int().min(1).max(30).optional() },
+  }, (a) => pay.paymentsOverview(db, a.limit ?? 10));
+
+  tool("add_payee", {
+    title: "Add an approved payee (family)",
+    description: "A family member adds someone she may pay by voice, with a per-payment limit. Payees blocked by a scam check can't be added.",
+    input: { name: z.string().min(2).max(80), kind: z.string().min(2).max(40), paypal_email: z.string().email().optional(),
+      per_payment_limit: z.number().positive().max(500), added_by: z.string().min(1).max(60) },
+  }, (a, now) => pay.addPayee(db, now, a, a.added_by));
 
   tool("get_weekly_review", {
     title: "Weekly care review (family)", readOnly: true,
