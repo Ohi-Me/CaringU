@@ -5,6 +5,8 @@ type AnsweredBy = { mode: string; model: string | null; fallback: { from: string
 type Turn = { role: "user" | "assistant"; text: string; by?: AnsweredBy };
 type ModeInfo = { configured: string; model: string | null; effective: string; credentials: { ok: boolean; error?: string } | null };
 type Orb = "idle" | "listening" | "thinking" | "speaking";
+type Route = "home" | "try" | "about";
+type Theme = "auto" | "light" | "dark";
 
 // Ordered to follow the demo story: scam call, duplicate dose, refill approval, stroke signs.
 const SUGGESTIONS = [
@@ -18,20 +20,23 @@ const SUGGESTIONS = [
   "When is my next doctor appointment?",
 ];
 
+const PAGES: { id: Route; href: string; label: string }[] = [
+  { id: "home", href: "#/", label: "Home" },
+  { id: "try", href: "#/try", label: "Try it" },
+  { id: "about", href: "#/about", label: "How it's built" },
+];
+const TITLES: Record<Route, string> = { home: "CareCircle", try: "Try CareCircle", about: "How CareCircle is built" };
+const readRoute = (): Route => (location.hash.startsWith("#/try") ? "try" : location.hash.startsWith("#/about") ? "about" : "home");
+
+// Three pages: Home (what it is, with a short animated example), Try it (the live demo),
+// How it's built (architecture, tests, the live protocol trace, who built it).
 export default function App() {
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [orb, setOrb] = useState<Orb>("idle");
-  const [input, setInput] = useState("");
-  const [speaker, setSpeaker] = useState("Asha (voice)");
-  const [voiceOn, setVoiceOn] = useState(true);
+  const [route, setRoute] = useState<Route>(readRoute);
+  // The demo stays mounted after the first visit, so a conversation survives a look at "How it's built".
+  const [tried, setTried] = useState(route === "try");
   const [events, setEvents] = useState<TraceEvent[]>([]);
-  const [tab, setTab] = useState<"family" | "trace">("family");
-  const [mobilePane, setMobilePane] = useState<"echo" | "side">("echo");
-  const [mode, setMode] = useState<ModeInfo | null>(null);
-  const [tick, setTick] = useState(0);
-  const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
   // Theme: auto follows the device; light/dark are remembered on this device (storage may be unavailable).
-  const [theme, setTheme] = useState<"auto" | "light" | "dark">(() => {
+  const [theme, setTheme] = useState<Theme>(() => {
     try { const t = localStorage.getItem("cc-theme"); return t === "light" || t === "dark" ? t : "auto"; } catch { return "auto"; }
   });
   useEffect(() => {
@@ -39,6 +44,180 @@ export default function App() {
     else document.documentElement.setAttribute("data-theme", theme);
     try { localStorage.setItem("cc-theme", theme); } catch { /* private mode: keep it for this visit only */ }
   }, [theme]);
+  useEffect(() => onTrace((e) => setEvents((xs) => [e, ...xs].slice(0, 200))), []);
+  useEffect(() => {
+    const on = () => { const r = readRoute(); setRoute(r); if (r === "try") setTried(true); window.scrollTo(0, 0); };
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  useEffect(() => { document.title = TITLES[route]; }, [route]);
+
+  return (
+    <div className="app">
+      <header className="top">
+        <a className="brand" href="#/" aria-label="CareCircle home">
+          <svg className="logo" viewBox="0 0 40 40" aria-hidden>
+            <circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" strokeWidth="5" />
+            <circle cx="20" cy="20" r="5.5" fill="currentColor" />
+          </svg>
+          <span>CareCircle</span>
+        </a>
+        <nav className="nav" aria-label="Pages">
+          {PAGES.map((p) => <a key={p.id} href={p.href} aria-current={route === p.id ? "page" : undefined}>{p.label}</a>)}
+        </nav>
+        <Corner theme={theme} setTheme={setTheme} />
+      </header>
+
+      {route === "home" && <Home />}
+      {tried && <div hidden={route !== "try"}><TryIt active={route === "try"} clearEvents={() => setEvents([])} /></div>}
+      {route === "about" && <About events={events} />}
+
+      <footer className="foot">
+        Not a medical device and not connected to Alexa or any Echo device. Emergency: call 112 (India) / 911 (US).
+      </footer>
+    </div>
+  );
+}
+
+// ---------------- corner: current time and theme ----------------
+const THEMES: { id: Theme; label: string; icon: React.ReactElement }[] = [
+  { id: "auto", label: "Match this device", icon: <svg viewBox="0 0 20 20" aria-hidden><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M10 3a7 7 0 0 1 0 14z" fill="currentColor" /></svg> },
+  { id: "light", label: "Light", icon: <svg viewBox="0 0 20 20" aria-hidden><circle cx="10" cy="10" r="3.5" fill="currentColor" /><path d="M10 1.5v2.5M10 16v2.5M1.5 10H4M16 10h2.5M4 4l1.8 1.8M14.2 14.2 16 16M4 16l1.8-1.8M14.2 5.8 16 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg> },
+  { id: "dark", label: "Dark", icon: <svg viewBox="0 0 20 20" aria-hidden><path d="M15.5 12.5A6.5 6.5 0 0 1 7.5 4.5a6.5 6.5 0 1 0 8 8z" fill="currentColor" /></svg> },
+];
+
+function Corner({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 10_000); return () => clearInterval(t); }, []);
+  return (
+    <div className="corner">
+      <time className="now" dateTime={now.toISOString()}>
+        {now.toLocaleDateString(undefined, { weekday: "short" })} {now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+      </time>
+      <div className="theme-switch" role="group" aria-label="Colour theme">
+        {THEMES.map((t) => <button key={t.id} aria-pressed={theme === t.id} aria-label={t.label} title={t.label} onClick={() => setTheme(t.id)}>{t.icon}</button>)}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Home ----------------
+// The example is the real flow, with the safety screen's reply shortened (the app also lists the warning signs).
+const STORY = [
+  { label: "Asha asks", text: "A man from the bank is on the line. He wants my OTP." },
+  { label: "It warns her", text: "Hang up now. This looks like a scam. Don't share any code or PIN. I've alerted Ravi." },
+  { label: "Ravi is alerted", text: "Possible scam call. Asha was told to hang up." },
+  { label: "Ravi answers", text: "Ravi is calling you right now. Please pick up." },
+];
+
+function Story() {
+  const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // step 0 is the empty kitchen; 1-4 add one beat each. Reduced motion starts on the finished scene.
+  const [step, setStep] = useState(reduce ? 4 : 0);
+  const [playing, setPlaying] = useState(!reduce);
+  useEffect(() => {
+    if (!playing) return;
+    const t = setTimeout(() => setStep((s) => (s + 1) % 5), step === 0 ? 900 : step === 4 ? 4500 : 2600);
+    return () => clearTimeout(t);
+  }, [playing, step]);
+  const show = (i: number) => (step >= i ? "on" : "");
+  return (
+    <figure className="story" aria-label="Example: Asha gets a scam call">
+      <div className="scene">
+        <div className="mini-speaker">
+          <div className="mini-top"><span className={`mini-ring ${step === 2 || step === 4 ? "lit" : ""}`} aria-hidden /> Asha's kitchen speaker</div>
+          <p className={`bubble b-her ${show(1)}`}><b>Asha</b>“{STORY[0].text}”</p>
+          <p className={`bubble b-cc ${show(2)}`}><b>CareCircle</b>{STORY[1].text}</p>
+          <p className={`bubble b-cc ${show(4)}`}><b>CareCircle</b>{STORY[3].text}</p>
+        </div>
+        <div className="mini-phone">
+          <div className="mini-top">Ravi's phone</div>
+          <div className={`notif ${show(3)}`}>
+            <b className="urgent-text">Urgent</b>
+            <span>{STORY[2].text}</span>
+            <span className={`notif-btn ${step >= 4 ? "pressed" : ""}`}>{step >= 4 ? "Calling Asha…" : "I'm calling her now"}</span>
+          </div>
+        </div>
+      </div>
+      <figcaption className="story-bar">
+        <ol className="story-steps">
+          {STORY.map((s, i) => (
+            <li key={s.label}><button aria-current={step === i + 1 ? "step" : undefined} onClick={() => { setPlaying(false); setStep(i + 1); }}>{s.label}</button></li>
+          ))}
+        </ol>
+        <button className="ghost" onClick={() => { if (playing) setPlaying(false); else { setStep(0); setPlaying(true); } }}>{playing ? "Pause" : "Play again"}</button>
+      </figcaption>
+    </figure>
+  );
+}
+
+const POINTS: { title: string; body: string; art: React.ReactElement }[] = [
+  {
+    title: "Stops scams before she shares anything",
+    body: "She describes a call or a message. CareCircle checks it for scam signs, tells her what to do, and alerts the family.",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="20" y="8" width="34" height="56" rx="7" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="26" y="16" width="22" height="30" rx="3" fill="var(--wash)" /><path d="M58 22c8 0 16 4 16 4v14c0 10-8 16-16 19-8-3-16-9-16-19V26s8-4 16-4z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /><path d="M58 32v10" stroke="var(--sindoor)" strokeWidth="3" strokeLinecap="round" /><circle cx="58" cy="48" r="2" fill="var(--sindoor)" /></svg>),
+  },
+  {
+    title: "Prevents a double dose",
+    body: "Every \"I took my pill\" is checked against the record first. If it looks like a second dose, it asks before anything else.",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><circle cx="36" cy="36" r="22" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><path d="M36 22v14l9 6" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" fill="none" /><rect x="56" y="26" width="30" height="14" rx="7" transform="rotate(-30 71 33)" fill="var(--haldi-soft)" stroke="var(--haldi)" strokeWidth="2.5" /><path d="M66 38l9-15" stroke="var(--haldi)" strokeWidth="2" /></svg>),
+  },
+  {
+    title: "Keeps the family close",
+    body: "Photos and notes from the family are shown and read aloud on her speaker. If she hasn't spoken by 11:00, they get one gentle nudge.",
+    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="14" y="12" width="52" height="44" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><path d="M20 50l13-14 9 9 7-6 11 11z" fill="var(--wash)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" /><circle cx="50" cy="24" r="4" fill="var(--haldi)" /><path d="M76 58s-12-7-12-14a6 6 0 0 1 12-2 6 6 0 0 1 12 2c0 7-12 14-12 14z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /></svg>),
+  },
+];
+
+function Home() {
+  return (
+    <main className="home">
+      <section className="hero">
+        <div className="hero-text">
+          <h1>Ask before you act.</h1>
+          <p className="lead">CareCircle is a voice companion for a parent who lives alone, and a window for their family. It catches scams and double doses, and it never changes anything without a clear yes.</p>
+          <div className="btns">
+            <a className="button" href="#/try">Try it yourself</a>
+            <a className="button ghost" href="#/about">How it's built</a>
+          </div>
+        </div>
+        <Story />
+      </section>
+
+      <section className="points" aria-labelledby="points-title">
+        <h2 id="points-title">What it does for Asha and her family</h2>
+        <ul>
+          {POINTS.map((p) => (
+            <li key={p.title}>
+              <div className="point-art">{p.art}</div>
+              <h3>{p.title}</h3>
+              <p>{p.body}</p>
+            </li>
+          ))}
+        </ul>
+        <p className="muted">It also recognises emergency signs like a drooping face or chest pain, checks a medicine strip with the camera, and alerts Ravi first, then Neha if nobody answers in 3 minutes.</p>
+      </section>
+
+      <section className="closing">
+        <h2>See it work</h2>
+        <p className="muted">The demo shows Asha's speaker and Ravi's phone side by side, with sample data. Voice works in Chrome or Edge; you can also type.</p>
+        <a className="button" href="#/try">Try it yourself</a>
+      </section>
+    </main>
+  );
+}
+
+// ---------------- Try it (the live demo) ----------------
+function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => void }) {
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [orb, setOrb] = useState<Orb>("idle");
+  const [input, setInput] = useState("");
+  const [speaker, setSpeaker] = useState("Asha (voice)");
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [mobilePane, setMobilePane] = useState<"echo" | "side">("echo");
+  const [mode, setMode] = useState<ModeInfo | null>(null);
+  const [tick, setTick] = useState(0);
+  const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
   // A question the MCP server is asking the person on this device (elicitation), relayed by the agent.
   const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
   const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
@@ -49,9 +228,12 @@ export default function App() {
   const recRef = useRef<any>(null);
   const orbRef = useRef<Orb>("idle");
   orbRef.current = orb;
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
-  useEffect(() => onTrace((e) => setEvents((xs) => [e, ...xs].slice(0, 200))), []);
-  // Re-checked after every reply, so the badge reflects whether Bedrock credentials work right now.
+  // Leaving the page silences her device.
+  useEffect(() => { if (!active) { speechSynthesis?.cancel(); recRef.current?.stop(); } }, [active]);
+  // Re-checked after every reply, so the status reflects whether the model's credentials work right now.
   useEffect(() => { fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null)); }, [tick]);
   useEffect(() => {
     const load = () => fetch("/api/clock").then((r) => r.json()).then(setClock).catch(() => {});
@@ -75,10 +257,10 @@ export default function App() {
   const speakRef = useRef(speak);
   speakRef.current = speak;
 
-  // Her device: speak caregiver replies and escalation notices as they arrive (via MCP).
+  // Her device: speak caregiver replies and escalation notices as they arrive (via MCP), only while this page is open.
   useEffect(() => {
     const t = setInterval(async () => {
-      if (orbRef.current !== "idle") return;
+      if (!activeRef.current || orbRef.current !== "idle") return;
       const r = await callTool<any[]>("get_announcements", {}, true);
       if (!r.ok || !r.data.length) return;
       const msgs = r.data;
@@ -194,7 +376,7 @@ export default function App() {
     if (!confirm(time ? `Reset all sample data and start the demo day at ${time}?` : "Reset all sample data using the real current time?")) return;
     speechSynthesis?.cancel();
     await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(time ? { time } : {}) });
-    setTurns([]); setEvents([]); setTick((x) => x + 1);
+    setTurns([]); clearEvents(); setTick((x) => x + 1);
   };
 
   const last = [...turns].reverse();
@@ -215,47 +397,42 @@ export default function App() {
   const lastAssistant = last.find((t) => t.role === "assistant");
   const lastUser = last.find((t) => t.role === "user");
 
-  return (
-    <div className="app">
-      <header className="top">
-        <div className="brand">
-          <svg className="logo" viewBox="0 0 40 40" aria-hidden>
-            <circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" strokeWidth="5" />
-            <circle cx="20" cy="20" r="5.5" fill="currentColor" />
-          </svg>
-          <div>
-            <h1>CareCircle</h1>
-            <p className="sub">Ask before you act. A voice companion for Asha, and a window for her family.</p>
-          </div>
-        </div>
-        <div className="top-actions">
-          <span className={`pill ${mode?.effective === "bedrock" || mode?.effective === "nebius" ? "pill-good" : mode?.configured !== "rules" ? "pill-warn" : "pill-muted"}`}
-            title={mode?.credentials && !mode.credentials.ok ? `Bedrock configured but credentials failed: ${mode.credentials.error}` : mode?.model ?? "Deterministic rule-based planner"}>
-            {!mode ? "Agent offline" : mode.effective === "bedrock" ? "Amazon Bedrock, Nova Pro" : mode.effective === "nebius" ? "NVIDIA Nemotron on Nebius" : mode.configured !== "rules" ? "Model unavailable, using rules" : "Rule-based agent"}
-          </span>
-          <span className="pill pill-muted">MCP 2025-11-25 · Streamable HTTP</span>
-          {clock && <span className={`pill ${clock.simulated ? "pill-warn" : "pill-muted"}`} title={clock.now}>{clock.simulated ? "Demo time " : "Time "}{new Date(clock.now).toTimeString().slice(0, 5)}</span>}
-          <div className="theme-switch" role="group" aria-label="Colour theme">
-            {(["auto", "light", "dark"] as const).map((t) => (
-              <button key={t} aria-pressed={theme === t} onClick={() => setTheme(t)}>{t === "auto" ? "Auto" : t === "light" ? "Light" : "Dark"}</button>
-            ))}
-          </div>
-          <button className="ghost" onClick={() => advance(3)} title="Move the demo clock forward 3 minutes (shows escalation)">+3 min</button>
-          <button className="ghost" onClick={() => advance(60)} title="Move the demo clock forward 1 hour (shows the daily check-in nudge)">+1 h</button>
-          <button className="ghost" onClick={() => reset("10:00")} title="Reset sample data and start at 10:00">Reset demo (10:00)</button>
-          <button className="ghost" onClick={() => reset()} title="Reset sample data using the real time">Reset (now)</button>
-        </div>
-      </header>
+  const modeText = !mode ? "The agent is offline."
+    : mode.effective === "bedrock" ? `Replies come from Amazon Bedrock (${mode.model}).`
+    : mode.effective === "nebius" ? `Replies come from NVIDIA Nemotron on Nebius (${mode.model}).`
+    : mode.configured !== "rules" ? `The model is unavailable${mode.credentials?.error ? ` (${mode.credentials.error})` : ""}, so the rule-based planner is answering.`
+    : "Replies come from the rule-based planner (no model).";
 
-      <Features />
+  return (
+    <main className="try">
+      <div className="try-head">
+        <div>
+          <h1>Try it yourself</h1>
+          <p className="muted">On the left is Asha's kitchen speaker; on the right, the family app on Ravi's phone. Tap a suggestion, type, or tap the circle and speak. Everything uses sample data.</p>
+        </div>
+        <details className="demo-controls">
+          <summary>Demo controls{clock?.simulated ? `, demo time ${new Date(clock.now).toTimeString().slice(0, 5)}` : ""}</summary>
+          <div className="demo-panel">
+            <p className="small">{modeText}</p>
+            <p className="small muted">Move time forward: 3 minutes passes an alert from Ravi to Neha, 1 hour passes the 11:00 check-in.</p>
+            <div className="btns">
+              <button className="ghost" onClick={() => advance(3)}>+3 minutes</button>
+              <button className="ghost" onClick={() => advance(60)}>+1 hour</button>
+            </div>
+            <div className="btns">
+              <button className="ghost" onClick={() => reset("10:00")}>Restart the day at 10:00</button>
+              <button className="ghost" onClick={() => reset()}>Restart at the real time</button>
+            </div>
+          </div>
+        </details>
+      </div>
 
       <nav className="mobile-tabs" role="tablist">
-        <button role="tab" aria-selected={mobilePane === "echo"} onClick={() => setMobilePane("echo")}>Talk</button>
-        <button role="tab" aria-selected={mobilePane === "side" && tab === "family"} onClick={() => { setMobilePane("side"); setTab("family"); }}>Family</button>
-        <button role="tab" aria-selected={mobilePane === "side" && tab === "trace"} onClick={() => { setMobilePane("side"); setTab("trace"); }}>MCP trace</button>
+        <button role="tab" aria-selected={mobilePane === "echo"} onClick={() => setMobilePane("echo")}>Asha's speaker</button>
+        <button role="tab" aria-selected={mobilePane === "side"} onClick={() => setMobilePane("side")}>Ravi's phone</button>
       </nav>
 
-      <main className="grid">
+      <div className="grid">
         <section className={`echo card device ${mobilePane === "echo" ? "" : "hide-mobile"}`} aria-label="Asha's CareCircle device">
           <div className="device-label"><span className="dot" aria-hidden /> Asha's kitchen speaker</div>
           <div className="speaker-row">
@@ -274,7 +451,7 @@ export default function App() {
           {deviceAsk && (
             <div className="ask-card" role="alertdialog" aria-label="Approval needed">
               <p className="ask-q">{deviceAsk.message}</p>
-              <p className="muted small">CareCircle's server is asking you directly (MCP elicitation). Nothing happens unless you say yes.</p>
+              <p className="muted small">Nothing happens unless you say yes.</p>
               <div className="btns big">
                 <button onClick={() => answerDevice(true)}>Yes, go ahead</button>
                 <button className="ghost" onClick={() => answerDevice(false)}>No</button>
@@ -294,17 +471,17 @@ export default function App() {
               <figcaption><b>From {moment.from}</b> {moment.text.replace(/^.*?shared a photo:\s*/, "")}</figcaption>
             </figure>
           )}
-          {stripImage && <figure className="strip-result"><img src={stripImage} alt="Strip check: green circles are pills found, red are empty cavities" /><figcaption>OpenCV strip check: green = pill, red = empty</figcaption></figure>}
+          {stripImage && <figure className="strip-result"><img src={stripImage} alt="Strip check: green circles are pills found, red are empty cavities" /><figcaption>Strip check: green = pill, red = empty</figcaption></figure>}
           <div className="camera-row">
             <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) showStrip(f); e.target.value = ""; }} />
-            <button className="ghost" onClick={() => fileRef.current?.click()} disabled={orb === "thinking"}>📷 Show a medicine strip</button>
+            <button className="ghost" onClick={() => fileRef.current?.click()} disabled={orb === "thinking"}>Show a medicine strip to the camera</button>
           </div>
           <form className="ask" onSubmit={(e) => { e.preventDefault(); send(input); }}>
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Or type here…" aria-label="Message" />
             <button type="submit" disabled={!input.trim() || orb === "thinking"}>Send</button>
           </form>
 
-          <div className="chips">
+          <div className="chips" aria-label="Things to try">
             {SUGGESTIONS.map((s) => <button key={s} className="chip" onClick={() => send(s)} disabled={orb === "thinking"}>{s}</button>)}
           </div>
 
@@ -319,20 +496,12 @@ export default function App() {
         <section className={`side ${mobilePane === "side" ? "" : "hide-mobile"}`} aria-label="Family app on Ravi's phone">
           <div className="phone">
             <div className="phone-bar" aria-hidden><span className="phone-notch" /></div>
-            <div className="phone-screen">
-              <div className="tabs desktop-only" role="tablist">
-                <button role="tab" aria-selected={tab === "family"} onClick={() => setTab("family")}>Family</button>
-                <button role="tab" aria-selected={tab === "trace"} onClick={() => setTab("trace")}>What happened {events.length ? `(${events.length})` : ""}</button>
-              </div>
-              {tab === "family" ? <Family tick={tick} /> : <Trace events={events} />}
-            </div>
+            <div className="phone-screen"><Family tick={tick} /></div>
           </div>
         </section>
-      </main>
-      <footer className="foot">
-        Not a medical device and not connected to Alexa or any Echo device. Emergency: call 112 (India) / 911 (US).
-      </footer>
-    </div>
+      </div>
+      <p className="try-foot muted small">Want to see every step the agent took? Open <a href="#/about#trace">How it's built</a>; this conversation stays here.</p>
+    </main>
   );
 }
 
@@ -627,62 +796,80 @@ function StripCard({ busyKey, setBusyKey }: { busyKey: string | null; setBusyKey
   );
 }
 
-// ---------------- What CareCircle does (illustrated explainer) ----------------
-const FEATURES: { title: string; body: string; example: string; art: React.ReactElement }[] = [
-  {
-    title: "Scam guard",
-    body: "Asha describes a call or message. CareCircle checks it against common scam patterns before she shares anything.",
-    example: "\"The bank man wants my OTP\" → \"Hang up now\", and Ravi is alerted.",
-    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="20" y="8" width="34" height="56" rx="7" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="26" y="16" width="22" height="30" rx="3" fill="var(--tint-cream)" /><path d="M58 22c8 0 16 4 16 4v14c0 10-8 16-16 19-8-3-16-9-16-19V26s8-4 16-4z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /><path d="M58 32v10" stroke="var(--sindoor)" strokeWidth="3" strokeLinecap="round" /><circle cx="58" cy="48" r="2" fill="var(--sindoor)" /></svg>),
-  },
-  {
-    title: "Dose check",
-    body: "Every \"I took my pill\" is checked against the record. If it looks like a second dose, CareCircle asks before anything else.",
-    example: "\"Is that the dose you mean, or did you take another one?\"",
-    art: (<svg viewBox="0 0 96 72" aria-hidden><circle cx="36" cy="36" r="22" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><path d="M36 22v14l9 6" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" fill="none" /><rect x="56" y="26" width="30" height="14" rx="7" transform="rotate(-30 71 33)" fill="var(--tint-pistachio)" stroke="var(--tulsi)" strokeWidth="2.5" /><path d="M66 38l9-15" stroke="var(--tulsi)" strokeWidth="2" /></svg>),
-  },
-  {
-    title: "Strip check (camera)",
-    body: "Show a medicine strip to the camera. OpenCV recognises the medicine and counts what's left, then compares it with the record.",
-    example: "One more pill gone than recorded → \"Did you take it? Shall I note it?\"",
-    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="10" y="18" width="62" height="36" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" />{[0, 1, 2, 3].map((i) => <circle key={`a${i}`} cx={22 + i * 13} cy="29" r="5" fill={i === 3 ? "var(--paper)" : "var(--tint-mint)"} stroke="var(--tulsi)" strokeWidth="2" />)}{[0, 1, 2, 3].map((i) => <circle key={`b${i}`} cx={22 + i * 13} cy="43" r="5" fill="var(--tint-mint)" stroke="var(--tulsi)" strokeWidth="2" />)}<rect x="62" y="40" width="26" height="20" rx="4" fill="var(--tint-cream)" stroke="var(--ink)" strokeWidth="2.5" /><circle cx="75" cy="50" r="5" fill="none" stroke="var(--ink)" strokeWidth="2.5" /></svg>),
-  },
-  {
-    title: "Family alerts with a deadline",
-    body: "Urgent alerts go to Ravi first. If nobody responds in 3 minutes, Neha is told, then Asha hears to call 112.",
-    example: "Ravi taps \"I'm calling her now\" and her speaker says so out loud.",
-    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="14" y="10" width="28" height="52" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="54" y="10" width="28" height="52" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><path d="M42 30h12" stroke="var(--haldi)" strokeWidth="3" strokeLinecap="round" strokeDasharray="3 4" /><path d="M28 26c0-4 3-6 0-6s0 2 0 6zM24 32h8" stroke="var(--haldi)" strokeWidth="2.5" strokeLinecap="round" fill="var(--haldi-soft)" /><circle cx="68" cy="30" r="6" fill="var(--leaf-soft)" stroke="var(--leaf)" strokeWidth="2.5" /><path d="M65 30l2 2 4-4" stroke="var(--leaf)" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>),
-  },
-  {
-    title: "Asks before acting",
-    body: "Refills and appointment changes only happen after a clear yes, on her speaker or on the family app. The AI cannot approve them by itself.",
-    example: "\"Send a refill request for Amlodipine?\" Yes / No",
-    art: (<svg viewBox="0 0 96 72" aria-hidden><rect x="14" y="14" width="68" height="44" rx="10" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.5" /><rect x="22" y="38" width="24" height="12" rx="6" fill="var(--tulsi)" /><rect x="50" y="38" width="24" height="12" rx="6" fill="none" stroke="var(--ink-soft)" strokeWidth="2" /><path d="M24 26h40" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" /></svg>),
-  },
-  {
-    title: "Emergency signs, never missed",
-    body: "Stroke signs, chest pain, breathing trouble or a bad fall are recognised by fixed rules on every message, even if the AI is down.",
-    example: "\"My face feels droopy\" → \"Please call 112 now\", and family is alerted.",
-    art: (<svg viewBox="0 0 96 72" aria-hidden><path d="M48 60S16 42 16 26c0-9 7-15 15-15 7 0 12 4 17 10 5-6 10-10 17-10 8 0 15 6 15 15 0 16-32 34-32 34z" fill="var(--sindoor-soft)" stroke="var(--sindoor)" strokeWidth="2.5" /><path d="M24 34h12l5-9 7 18 5-9h19" stroke="var(--sindoor)" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>),
-  },
+// ---------------- How it's built ----------------
+const SAFETY_LAYERS = [
+  ["Safety screen", "Emergency signs and scam patterns are checked by fixed rules on every message, before any AI sees it."],
+  ["Dose check", "Every \"I took my pill\" is recorded and compared with the minimum gap first. A possible second dose gets a question, not a guess."],
+  ["Asks before acting", "Refills and appointment changes wait for a yes. The server asks the person itself (MCP elicitation), so the AI cannot approve on her behalf."],
+  ["Guards on the AI", "Family-only tools are blocked when Asha is speaking, refills are only offered for medicines that are actually low, and replies that claim an action the system didn't take are corrected."],
+  ["Escalation with a deadline", "Urgent alerts go to Ravi first, then Neha after 3 minutes, then Asha is told to call 112."],
+] as const;
+
+const EVALS = [
+  { set: "Scripted cases", n: 32, bedrock: 28, nemotron: 29 },
+  { set: "Held-out conversations", n: 24, bedrock: 24, nemotron: 21 },
+  { set: "Scenario set", n: 15, bedrock: 15, nemotron: 14 },
 ];
 
-function Features() {
+function About({ events }: { events: TraceEvent[] }) {
+  const [mode, setMode] = useState<ModeInfo | null>(null);
+  const [health, setHealth] = useState<any>(null);
+  useEffect(() => {
+    fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null));
+    fetch("/api/health").then((r) => r.json()).then(setHealth).catch(() => setHealth(null));
+    if (location.hash.includes("#trace")) document.getElementById("trace")?.scrollIntoView();
+  }, []);
+  const model = !mode ? "offline" : mode.effective === "bedrock" ? "Amazon Bedrock" : mode.effective === "nebius" ? "NVIDIA Nemotron" : "rule-based planner";
   return (
-    <section className="features" aria-labelledby="features-title">
-      <h2 id="features-title">What CareCircle does</h2>
-      <p className="features-lead">Six things it does for Asha and her family. Safety rules run as fixed code; the AI handles the conversation.</p>
-      <div className="feature-grid">
-        {FEATURES.map((f) => (
-          <article key={f.title} className="feature">
-            <div className="feature-art">{f.art}</div>
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
-            <p className="feature-eg">{f.example}</p>
-          </article>
-        ))}
-      </div>
-    </section>
+    <main className="about">
+      <section className="about-intro">
+        <h1>How CareCircle is built</h1>
+        <p className="lead">A language model handles the conversation. Everything that could hurt someone, like a double dose, a scam or a missed emergency, is decided by fixed code that is tested on its own.</p>
+      </section>
+
+      <section aria-labelledby="flow-title">
+        <h2 id="flow-title">From her words to a safe answer</h2>
+        <ol className="flow">
+          <li><h3>Her speaker or the family app</h3><p>Voice in the browser (Web Speech API), or typing. The family app talks to the server directly.</p></li>
+          <li><h3>Safety screen</h3><p>Fixed rules for emergencies and scams. Urgent cases are answered here, without the model.</p></li>
+          <li><h3>Agent</h3><p>Amazon Bedrock (Nova Pro), or NVIDIA Nemotron on Nebius, with guards on every tool call. If the model fails, a rule-based planner answers.</p></li>
+          <li><h3>MCP server</h3><p>23 care tools over Streamable HTTP. Approvals are asked of the person through MCP elicitation.</p></li>
+          <li><h3>Care record</h3><p>Medicines, doses, appointments, alerts and messages in SQLite. Strip photos go to an OpenCV 5 service that finds the medicine and counts what's left.</p></li>
+        </ol>
+        <p className="status small">
+          Live now: <b>{model}</b>{mode?.model ? ` (${mode.model})` : ""}; MCP {health?.protocol ?? "offline"}; strip check {health?.vision?.ok ? "online" : "offline"}.
+        </p>
+      </section>
+
+      <section aria-labelledby="safety-title">
+        <h2 id="safety-title">Safety is fixed code, not AI</h2>
+        <dl className="layers">
+          {SAFETY_LAYERS.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+        </dl>
+      </section>
+
+      <section aria-labelledby="eval-title">
+        <h2 id="eval-title">How it was tested</h2>
+        <table className="evals">
+          <thead><tr><th scope="col">Test set</th><th scope="col">Amazon Bedrock</th><th scope="col">NVIDIA Nemotron</th></tr></thead>
+          <tbody>
+            {EVALS.map((e) => <tr key={e.set}><th scope="row">{e.set}</th><td>{e.bedrock} of {e.n}</td><td>{e.nemotron} of {e.n}</td></tr>)}
+          </tbody>
+        </table>
+        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 45 automated tests cover the server without a model. The strip check is tested on generated images only; it has no accuracy figure on real photos yet.</p>
+      </section>
+
+      <section id="trace" aria-labelledby="trace-title">
+        <h2 id="trace-title">What happened in your demo</h2>
+        <Trace events={events} />
+      </section>
+
+      <section className="builder" aria-labelledby="builder-title">
+        <h2 id="builder-title">Who built it</h2>
+        <p>Built by <b>Rohit Kumar</b>, solo, for the Amazon Developer hackathon (Alexa+ track).</p>
+        <p><a href="https://github.com/Ohi-Me/CareCircle" target="_blank" rel="noreferrer">Source code on GitHub</a></p>
+      </section>
+    </main>
   );
 }
 
