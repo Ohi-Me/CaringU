@@ -1,7 +1,7 @@
 """Pipeline tests on SYNTHETIC strips (exact ground truth). They check the mechanics:
 identification, rejection of unknown strips, geometry and per-cavity classification
 under perspective, rotation, lighting gradients and blur. Real-photo accuracy is
-measured separately (scripts/eval_real.py) and reported in docs/vision-eval.md."""
+measured separately (scripts/eval_real.py) by scripts/eval_real.py."""
 import numpy as np
 import pytest
 

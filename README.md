@@ -24,6 +24,7 @@ At its core is a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) a
 | "My face feels strange and my words are coming out wrong" | Stroke signs are caught deterministically: `log_wellbeing` sends an urgent alert, and the reply starts with **"Please call 112 now."** |
 | "I'm running low on my BP pills" | `request_refill`: the **MCP server asks her directly** ("Send a refill request for 30 × Amlodipine…?"), by voice or with Yes/No buttons. The refill runs only if she says yes. |
 | Ravi: "Any problems with mom today?" | `get_family_digest`: doses taken and missed, alerts, refills, appointments, and whether a ride is arranged. |
+| Ravi taps **Write it up with AI** under *This week* | `get_weekly_review` gathers the week from the record; a model (NVIDIA Nemotron 3 Ultra or Amazon Bedrock) writes a short update, and a grounding check rejects it if it states any number that is not in the record. |
 
 ### Scam Lens: the camera answers "is this code safe?"
 
@@ -50,7 +51,7 @@ Money moves only through PayPal: from an account the family linked once (Vault v
 ### Strip check: the camera answers "did I take it?"
 
 CaringU's records only know doses someone reported. The **strip check** adds evidence:
-1. Asha holds a medicine **blister strip** up to the camera ("📷 Show a medicine strip").
+1. Asha holds a medicine **blister strip** up to the camera ("Show a medicine strip").
 2. An **OpenCV 5** service identifies which registered medicine it is, or **refuses if unsure**. It never guesses.
 3. It counts full and empty cavities and returns an annotated photo.
 4. CaringU **reconciles the count with the dose log** since the previous check:
@@ -62,7 +63,7 @@ CaringU's records only know doses someone reported. The **strip check** adds evi
 | **Two or more more gone**, or one more while a dose is already recorded within the minimum gap | **Possible double dose:** an urgent family alert, decided by deterministic rules, and she's told to call her pharmacist (or 112 if unwell). |
 | Fewer gone than recorded | Noted (perhaps another strip was used). |
 
-Caregivers register each medicine once from the dashboard with a top-down reference photo. Details: [`vision/`](vision) and [docs/vision-eval.md](docs/vision-eval.md).
+Caregivers register each medicine once from the dashboard with a top-down reference photo. Details: [`vision/`](vision).
 
 **OpenCV 5 pipeline** ([`strip.py`](vision/carecircle_vision/strip.py)):
 
@@ -73,7 +74,7 @@ Caregivers register each medicine once from the dashboard with a top-down refere
 | Find cavities (at registration) | Canny, morphology and `minAreaRect` for the outline, then `HoughCircles`, clustered with `kmeans` into an evenly spaced rows × cols grid |
 | Full or empty | Per-cavity CIE Lab distance to the learned pill colour and to the *local* foil ring (handles uneven light), plus a Laplacian texture cue for torn foil |
 
-The family dashboard (right side, or the *Family* tab on a phone) is a second MCP client running in the browser. It shows live alerts with the escalation chain and timeline, response buttons, today's medicine timeline, approvals, refills, appointments and messages sent to her device.
+The family dashboard (right side, or the *Ravi's phone* tab on a small screen) is a second MCP client running in the browser. It shows live alerts with the escalation chain and timeline, response buttons, today's medicine timeline, approvals, refills, appointments and messages sent to her device.
 
 ## What makes it trustworthy
 
@@ -82,9 +83,9 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
    - The scam screen follows the common scam playbook (credential requests, gift cards or crypto, remote-access apps, authority plus threat, family emergency plus money, secrecy). It also recognises legitimate notices, such as a bank telling you to call the number on your card, so they don't trigger alarms.
    - When the screen fires, the MCP tool runs and the emergency or scam instruction is guaranteed to be in the reply, whatever the agent does.
 2. **Approvals are enforced by the protocol, not the prompt.** Refills and appointment changes use **MCP elicitation**: the server sends `elicitation/create` on the SSE stream of the in-flight `tools/call`, and the person answers on their device or dashboard. The language model never sees or produces the approval. Clients without elicitation fall back to a two-step `confirmation_id` → `confirm_action` flow, behind a deterministic guard that blocks the model from approving anything unless the user's latest message says yes.
-3. **Honest about uncertainty.** Medication answers say what is *recorded*, never that a dose is *safe*. Missed doses go to the pharmacist. Tool errors are structured (`code`, `message`, `retryable`) and shown in red in the trace. If Bedrock fails, the trace says so and the rule-based planner answers instead.
+3. **Honest about uncertainty.** Medication answers say what is *recorded*, never that a dose is *safe*. Missed doses go to the pharmacist. Tool errors are structured (`code`, `message`, `retryable`) and shown in red in the trace. If the model fails, the trace says so and the rule-based planner answers instead.
 4. **Family in the loop, with a deadline.** Urgent alerts follow an escalation ladder (Ravi → Neha → tell her to call 112), driven by a reproducible clock and fully tested.
-5. **Transparent.** The **MCP trace** tab shows every JSON-RPC step: initialize, tools/list, each tools/call with its latency, the safety screen verdict, elicitation questions and answers, and guard blocks. The server keeps an audit log (long free text is truncated).
+5. **Transparent.** *How it's built → What happened in your demo* shows every JSON-RPC step: initialize, tools/list, each tools/call with its latency, the safety screen verdict, elicitation questions and answers, and guard blocks. The server keeps an audit log (long free text is truncated).
 
 ## What is real and what is simulated
 
@@ -95,7 +96,7 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 | MCP clients | **Real.** (1) The agent (server side) runs `initialize`, `tools/list` and `tools/call`, and handles elicitation by relaying questions to the device. (2) The family dashboard is an MCP client in the browser with its own elicitation handler. |
 | State | **Real.** SQLite (Node's built-in `node:sqlite`). Changes persist and are verified by re-reading. |
 | Agent | **Amazon Bedrock** Converse API with tool use (default `amazon.nova-pro-v1:0`), or **NVIDIA Nemotron** on Nebius Token Factory (`AGENT_MODE=nebius`), or a transparent rule-based planner when neither is configured |
-| Voice | Browser Web Speech API (speech recognition and synthesis, Chrome or Edge) |
+| Voice | Speech recognition in the browser (Chrome or Edge); replies in a natural voice from **Amazon Polly** (generative, then neural), with the browser's own voice as a fallback |
 | Smart speaker | **Simulated.** A voice-first web experience in the style of a smart speaker. **Not** connected to Alexa or an Echo device. |
 | People, pharmacy, notifications | **Sample data** (fictional people). Refills go to a simulated pharmacy. Family alerts and replies travel through the CaringU dashboard and device; there is no SMS. Payments run in the PayPal **sandbox** only (no real money). |
 
@@ -104,16 +105,19 @@ The family dashboard (right side, or the *Family* tab on a phone) is a second MC
 ```mermaid
 flowchart LR
   subgraph Browser
-    V["Her device<br/>voice UI + yes/no prompts"] -->|POST /api/agent/chat · NDJSON stream| A
-    V -->|answers: POST /api/agent/elicit/:id| A
-    D["Family dashboard<br/>MCP client + elicitation handler"] <-->|Streamable HTTP session| M
+    V["Her speaker<br/>voice in · natural voice out"] -->|POST /api/agent/chat · NDJSON stream| A
+    V -->|yes / no answers| A
+    D["Family app<br/>MCP client · approvals"] <-->|Streamable HTTP session| M
   end
-  subgraph Server ["Node.js server"]
-    A["Orchestrator<br/>1 safety screen<br/>2 Bedrock (Nova Pro) or rule planner<br/>3 confirmation guard"] <-->|MCP client · Streamable HTTP session| M["MCP server /mcp<br/>23 zod-validated tools<br/>elicitation for approvals"]
-    M --> C["care.ts · safety.ts · family.ts<br/>deterministic rules"]
-    M -->|HTTP| CV["OpenCV 5 vision service<br/>identify · warp · count cavities"]
+  subgraph Server ["Node.js server (AWS EC2, Graviton)"]
+    A["Agent<br/>1 safety screen (fixed rules)<br/>2 model: Bedrock or Nemotron<br/>3 guards on every tool call"] <-->|MCP client · Streamable HTTP| M["MCP server /mcp<br/>29 validated tools<br/>elicitation for approvals"]
+    M --> C["Fixed rules<br/>doses · scams · payments · alerts"]
     C --> DB[(SQLite)]
-    A -.->|Converse API| B[(Amazon Bedrock)]
+    M -->|HTTP| CV["OpenCV 5 service<br/>Scam Lens · strip check"]
+    M -->|REST| PP[(PayPal sandbox)]
+    A -.-> B[(Amazon Bedrock)]
+    A -.-> N[(NVIDIA Nemotron on Nebius)]
+    V -.->|/api/tts| P[(Amazon Polly)]
   end
 ```
 
@@ -159,7 +163,15 @@ Open **Try it**. Under **Demo controls**:
 2. Configure that identity as a profile, for example `aws configure --profile carecircle-dev`.
 3. Copy `.env.example` to `.env` and set `AWS_PROFILE=carecircle-dev` and `AGENT_MODE=bedrock`.
 
-**How it's built** shows which agent is answering right now.
+**Demo controls** on the Try it page shows which agent is answering right now.
+
+### Use NVIDIA Nemotron (Nebius Token Factory)
+
+Set `AGENT_MODE=nebius` and `NEBIUS_API_KEY` in `.env`. Everyday conversation uses Nemotron 3 Super, the weekly review uses Nemotron 3 Ultra, and Scam Lens asks Nemotron 3.5 Super VL to read the words around a code (turn that off with `NEBIUS_VISION=off`).
+
+### Natural voice
+
+Set `TTS_PROVIDER=polly` (the AWS identity needs `polly:SynthesizeSpeech`). Without it, the browser's own voice is used.
 
 ### Connect any MCP client
 
@@ -181,7 +193,6 @@ npm run eval      # 32 scripted conversations through agent -> MCP -> SQLite (se
 npm run heldout   # held-out sets: scam detector (40), symptom triage (30), conversations (24)
 cd ../vision && .venv/Scripts/python -m pytest      # 17 vision tests (generated strips and QR codes)
 python scripts/eval_lens.py 640 > ../docs/lens-eval.md               # Scam Lens: baseline vs view ladder, plus real photos if present
-python scripts/eval_real.py data/raw --out ../docs/vision-eval.md   # real photos (see docs/PHOTO-GUIDE.md)
 ```
 
 | Held-out measure (rule-based agent) | Baseline | After safety rework |
@@ -190,7 +201,7 @@ python scripts/eval_real.py data/raw --out ../docs/vision-eval.md   # real photo
 | Symptom triage accuracy · urgent recall · false emergencies | 40% · 50% · 2/8 | 97% · 100% · 0/8 |
 | End-to-end conversations | 7/24 | 24/24 |
 
-**Read these numbers with care.** The held-out sets were frozen before the rework ([baseline report](docs/heldout-baseline-rules.md)), but their failures were seen during development, so the "after" figures are optimistic. A blind set written by someone else is the next step, along with the same runs against Bedrock.
+**Read these numbers with care.** The held-out sets were frozen before the rework ([baseline report](docs/heldout-baseline-rules.md)), but their failures were seen during development, so the "after" figures are optimistic. The scripted and held-out sets were also run on Amazon Bedrock and NVIDIA Nemotron ([Bedrock](docs/evaluation-bedrock.md), [Nemotron](docs/evaluation-nebius.md)). A blind set written by someone else is the next step.
 
 ## Privacy and safety
 
@@ -203,8 +214,8 @@ python scripts/eval_real.py data/raw --out ../docs/vision-eval.md   # real photo
 - Family delivery goes to the CaringU dashboard only. Real SMS or push (for example Amazon SNS) is next.
 - One household, no authentication. A real deployment needs accounts and per-caregiver permissions.
 - The safety screens are transparent rules, chosen so they can be explained and audited. A model-based classifier could add recall, with the rules kept as a floor.
-- SQLite on a container's local disk resets when the container is redeployed. Use a managed database beyond a demo.
-- Real Alexa+ integration needs the gated Alexa+ Add-on tools. The MCP server (Streamable HTTP, elicitation-ready) is the piece that would be registered.
+- The demo keeps its data in SQLite on the server's disk. A real deployment needs a managed database and backups.
+- Running on a real smart speaker needs that platform's developer tools. The MCP server (Streamable HTTP, elicitation-ready) is the piece that would be registered.
 
 ## License
 

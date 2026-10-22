@@ -41,7 +41,7 @@ PAYLOADS = [
     "bitcoin:bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh?amount=0.01",
     "WIFI:T:WPA;S:Clinic-Guest;P:wait4doctor;;",
 ]
-# Real photos are of the three demo samples (docs/PHOTO-GUIDE.md), so the file name gives the label.
+# Real photos are of the three demo samples (phone photos named prize_N, kyc_N, pharmacy_N or nocode_N), so the file name gives the label.
 REAL_PREFIX = {"prize": PAYLOADS[0], "pharmacy": PAYLOADS[1], "kyc": PAYLOADS[4], "nocode": None}
 DISTANCE = {"near": 1.0, "mid": 0.55, "far": 0.33, "very far": 0.22}  # whole photo downscaled
 BLUR = {"none": 0.0, "some": 1.6, "heavy": 2.8, "extreme": 4.0}  # extra Gaussian sigma

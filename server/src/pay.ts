@@ -39,13 +39,15 @@ async function accessToken() {
   return tokenCache.token;
 }
 
-async function paypal(path: string, body?: unknown, requestId?: string) {
+async function paypal(path: string, body?: unknown, requestId?: string, retried = false): Promise<any> {
   if (!paypalConfigured()) throw new ToolError("PAYPAL_NOT_CONFIGURED", "PayPal sandbox keys are not set (PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET). No money was moved.");
   const res = await fetch(`${PP.base}${path}`, {
     method: "POST", body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000),
     headers: { Authorization: `Bearer ${await accessToken()}`, "Content-Type": "application/json", "PayPal-Request-Id": requestId ?? randomUUID() },
   }).catch(() => null);
   const out: any = await res?.json().catch(() => ({}));
+  // Permissions changed in the PayPal dashboard only show up in a new access token: sign in again once.
+  if (res?.status === 403 && !retried) { tokenCache = null; return paypal(path, body, requestId, true); }
   if (!res?.ok) throw new ToolError("PAYPAL_ERROR", `PayPal ${res?.status ?? "unreachable"}: ${out?.details?.[0]?.issue ?? out?.name ?? "error"}${out?.details?.[0]?.description ? ` (${out.details[0].description})` : ""}. No money was moved.`, (res?.status ?? 500) >= 500);
   return out;
 }

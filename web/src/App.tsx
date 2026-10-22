@@ -100,7 +100,7 @@ function Corner({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => voi
   return (
     <div className="corner">
       <time className="now" dateTime={now.toISOString()}>
-        {now.toLocaleDateString(undefined, { weekday: "short" })} {now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+        {now.toLocaleDateString(undefined, { weekday: "short" })} {now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}
       </time>
       <div className="theme-switch" role="group" aria-label="Colour theme">
         {THEMES.map((t) => <button key={t.id} aria-pressed={theme === t.id} aria-label={t.label} title={t.label} onClick={() => setTheme(t.id)}>{t.icon}</button>)}
@@ -290,7 +290,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
   const [mobilePane, setMobilePane] = useState<"echo" | "side">("echo");
   const [mode, setMode] = useState<ModeInfo | null>(null);
   const [tick, setTick] = useState(0);
-  const [clock, setClock] = useState<{ now: string; simulated: boolean } | null>(null);
+  const [clock, setClock] = useState<{ now: string; simulated: boolean; local?: string; place?: string } | null>(null);
   // A question the MCP server is asking the person on this device (elicitation), relayed by the agent.
   const [deviceAsk, setDeviceAsk] = useState<{ id: string; message: string } | null>(null);
   const deviceAskRef = useRef<{ id: string; message: string } | null>(null);
@@ -491,10 +491,10 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
       <div className="try-head">
         <div>
           <h1>Try it yourself</h1>
-          <p className="muted">On the left is Asha's kitchen speaker; on the right, the family app on Ravi's phone. Tap a suggestion, type, or tap the circle and speak. Everything uses sample data.</p>
+          <p className="muted">On the left is Asha's kitchen speaker; on the right, the family app on Ravi's phone. Tap a suggestion, type, or tap the circle and speak. Everything uses sample data. Times on both devices are Asha's time{clock?.place ? ` in ${clock.place}` : ""}; the clock in the corner is yours.</p>
         </div>
         <details className="demo-controls">
-          <summary>Demo controls{clock?.simulated ? `, demo time ${new Date(clock.now).toTimeString().slice(0, 5)}` : ""}</summary>
+          <summary>Demo controls{clock?.local ? ` · Asha's time ${clock.local}` : ""}</summary>
           <div className="demo-panel">
             <p className="small">{modeText}</p>
             <p className="small muted">Move time forward: 3 minutes passes an alert from Ravi to Neha, 1 hour passes the 11:00 check-in.</p>
@@ -1006,8 +1006,8 @@ const EVALS = [
 const GH = "https://github.com/Ohi-Me/CaringU/blob/main/";
 // Each part of CaringU by the job it does: which technology, what it is allowed to decide, and the evidence.
 const PARTS: { job: string; tech: string; does: string; evidence: string; code: string }[] = [
-  { job: "Understanding what she says", tech: "Amazon Bedrock (Nova Pro) · NVIDIA Nemotron 3 Super on Nebius",
-    does: "Turns her words into the right action and a short, kind reply. It chooses tools; it never approves anything, and every tool call is checked by fixed rules first.",
+  { job: "Understanding what she says", tech: "Amazon Bedrock (Nova Pro) · NVIDIA Nemotron 3 Super · Amazon Polly",
+    does: "Turns her words into the right action and a short, kind reply, spoken in a natural voice. It chooses tools; it never approves anything, and every tool call is checked by fixed rules first.",
     evidence: "Run on both models with the same tests: see How it was tested below.", code: "server/src/agent.ts" },
   { job: "Doing things safely", tech: "Model Context Protocol server (29 tools)",
     does: "Every action is a small tool with checked inputs and an audit log. Refills, appointment changes and payments ask the person for a yes through MCP elicitation, so the AI can't say yes for her.",
@@ -1046,14 +1046,7 @@ function Parts() {
 }
 
 function About({ events }: { events: TraceEvent[] }) {
-  const [mode, setMode] = useState<ModeInfo | null>(null);
-  const [health, setHealth] = useState<any>(null);
-  useEffect(() => {
-    fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null));
-    fetch("/api/health").then((r) => r.json()).then(setHealth).catch(() => setHealth(null));
-    if (location.hash.includes("#trace")) document.getElementById("trace")?.scrollIntoView();
-  }, []);
-  const model = !mode ? "offline" : mode.effective === "bedrock" ? "Amazon Bedrock" : mode.effective === "nebius" ? "NVIDIA Nemotron" : "rule-based planner";
+  useEffect(() => { if (location.hash.includes("#trace")) document.getElementById("trace")?.scrollIntoView(); }, []);
   return (
     <main className="about">
       <section className="about-intro">
@@ -1064,15 +1057,12 @@ function About({ events }: { events: TraceEvent[] }) {
       <section aria-labelledby="flow-title">
         <h2 id="flow-title">From her words to a safe answer</h2>
         <ol className="flow">
-          <li><h3>Her speaker or the family app</h3><p>Voice in the browser (Web Speech API), or typing. The family app talks to the server directly.</p></li>
+          <li><h3>Her speaker or the family app</h3><p>She speaks or types; the browser turns her speech into text, and CaringU answers in a natural voice (Amazon Polly). The family app talks to the server directly.</p></li>
           <li><h3>Safety screen</h3><p>Fixed rules for emergencies and scams. Urgent cases are answered here, without the model.</p></li>
           <li><h3>Agent</h3><p>Amazon Bedrock (Nova Pro), or NVIDIA Nemotron on Nebius, with guards on every tool call. If the model fails, a rule-based planner answers.</p></li>
           <li><h3>MCP server</h3><p>29 care tools over Streamable HTTP. Approvals are asked of the person through MCP elicitation.</p></li>
           <li><h3>Care record and payments</h3><p>Medicines, doses, appointments, alerts and messages in SQLite. Payments go through PayPal (sandbox) only after the payment rules allow them. Photos go to an OpenCV 5 service that reads QR codes and payment requests (Scam Lens), and recognises a medicine strip and counts the pills left.</p></li>
         </ol>
-        <p className="status small">
-          Live now: <b>{model}</b>{mode?.model ? ` (${mode.model})` : ""}; MCP {health?.protocol ?? "offline"}; camera checks (OpenCV) {health?.vision?.ok ? "online" : "offline"}.
-        </p>
       </section>
 
       <Parts />
@@ -1092,7 +1082,7 @@ function About({ events }: { events: TraceEvent[] }) {
             {EVALS.map((e) => <tr key={e.set}><th scope="row">{e.set}</th><td>{e.bedrock} of {e.n}</td><td>{e.nemotron} of {e.n}</td></tr>)}
           </tbody>
         </table>
-        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the reports on GitHub. 62 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. Camera results are in docs/lens-eval.md.</p>
+        <p className="small muted">These are real model runs. The test cases were written by the builder, and some held-out cases were seen before fixes, so they are not an independent benchmark. The failed cases and their causes are in the <a href={GH.replace("/blob/", "/tree/") + "docs"} target="_blank" rel="noreferrer">test reports</a>. 62 automated tests cover the server without a model, including Scam Lens end to end and the weekly review's grounding check. The camera results are in the <a href={GH + "docs/lens-eval.md"} target="_blank" rel="noreferrer">Scam Lens evaluation</a>.</p>
       </section>
 
       <section id="trace" aria-labelledby="trace-title">
@@ -1122,7 +1112,7 @@ function Trace({ events }: { events: TraceEvent[] }) {
       <div className="card">
         <h2>Live protocol trace</h2>
         <p className="muted small">Every line is a real JSON-RPC message to the CaringU MCP server over Streamable HTTP, from the agent (server side) or this dashboard (browser).</p>
-        {events.length === 0 ? <p className="muted">Say something to see the tool calls.</p> : (
+        {events.length === 0 ? <p className="muted">Try something on the Try it page, then come back: every step will be listed here.</p> : (
           <ul className="trace">
             {events.map((e, i) => (
               <li key={i} className={`k-${e.kind.replace("/", "-")} ${e.ok === false ? "bad" : ""}`}>
@@ -1143,6 +1133,7 @@ function Trace({ events }: { events: TraceEvent[] }) {
       </div>
       <div className="card">
         <h2>Server audit log</h2>
+        <p className="muted small">The latest tool calls from everyone using this demo, in Asha's time.</p>
         <table className="audit">
           <thead><tr><th>Time</th><th>Tool</th><th>Result</th><th>ms</th></tr></thead>
           <tbody>{audit.map((a, i) => <tr key={i}><td>{a.at.split(" ")[1]}</td><td>{a.tool}</td><td className={a.ok ? "" : "warn-text"}>{a.ok ? "ok" : a.code}</td><td>{a.latency_ms}</td></tr>)}</tbody>

@@ -248,7 +248,7 @@ def cavity_features(canon: np.ndarray, cavities: list[Cavity], foils: list[np.nd
 
 
 def classify(feat: dict, has_pill_model: bool) -> tuple[str, float]:
-    """Pill present vs empty. Returns (state, score in 0..1). Thresholds are calibrated in docs/vision-eval.md."""
+    """Pill present vs empty. Returns (state, score in 0..1). Thresholds were tuned on generated strips (tests/test_strip.py)."""
     if has_pill_model:
         score = 0.65 * feat["pill_sim"] + 0.35 * feat["foil_diff"] - 0.8 * max(0.0, feat["texture"] - 0.12)
     else:

@@ -1,3 +1,4 @@
+import { CARE_PLACE } from "./tz.js";
 import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { existsSync } from "node:fs";
@@ -116,7 +117,12 @@ app.get("/api/vision/photo/:id/annotated", (req, res) => {
   res.set("Cache-Control", "no-store").type("jpeg").sendFile(p);
 });
 app.get("/api/activity", (_req, res) => res.json(activityLog(db, 40)));
-app.get("/api/clock", (_req, res) => res.json({ now: clock().toString(), simulated: offsetMs !== 0 }));
+// local: Asha's wall-clock time, so every viewer sees her time whatever their own time zone.
+app.get("/api/clock", (_req, res) => {
+  const now = clock();
+  res.json({ now: now.toString(), simulated: offsetMs !== 0, place: CARE_PLACE,
+    local: now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }) });
+});
 // Demo control: move the demo clock forward (e.g. to show the escalation ladder on camera).
 app.post("/api/clock/advance", (req, res) => {
   const minutes = Number(req.body?.minutes);

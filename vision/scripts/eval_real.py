@@ -1,6 +1,6 @@
 """Evaluate the strip check on labelled photos.
 
-Folder layout (see docs/PHOTO-GUIDE.md):
+Folder layout:
   ref_<medicine>_<left>of<total>.jpg     one reference per strip (top-down)
   <medicine>_<left>of<total>_<n>[_back].jpg   test photos
 
@@ -11,7 +11,7 @@ Reports, per photo and overall:
 and compares with a BASELINE that skips reference matching (strip outline +
 the same cavity grid and classifier), to show what SIFT + homography adds.
 
-Usage:  python scripts/eval_real.py data/raw  [--out ../docs/vision-eval.md] [--label real]
+Usage:  python scripts/eval_real.py data/raw  [--out ../docs/strip-eval.md] [--label real]
 """
 from __future__ import annotations
 
