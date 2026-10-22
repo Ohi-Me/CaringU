@@ -209,7 +209,12 @@ export async function startLink(db: DB) {
     description: "CaringU: pay Asha's approved bills", usage_pattern: "IMMEDIATE", usage_type: "MERCHANT", customer_type: "CONSUMER",
     permit_multiple_payment_tokens: false,
     experience_context: { brand_name: "CaringU", shipping_preference: "NO_SHIPPING",
-      return_url: `${PP.publicUrl()}/api/pay/linked`, cancel_url: `${PP.publicUrl()}/api/pay/cancel` } } } });
+      return_url: `${PP.publicUrl()}/api/pay/linked`, cancel_url: `${PP.publicUrl()}/api/pay/cancel` } } } })
+    .catch((e: ToolError) => {
+      if (/ 403: NOT_AUTHORIZED/.test(e.message))
+        throw new ToolError("PAYPAL_VAULT_OFF", "This PayPal app can't save accounts yet. In the PayPal Developer Dashboard, open the app and turn on \"Save payment methods\". Until then, each payment is approved in PayPal.");
+      throw e;
+    });
   setSetting(db, "paypal_setup_token", t.id);
   return { setup_token_id: t.id, approve_url: (t.links ?? []).find((l: Row) => l.rel === "approve")?.href ?? null };
 }
