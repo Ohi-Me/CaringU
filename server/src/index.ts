@@ -13,6 +13,7 @@ import { markActivity, runCheckins, runEscalations, syncKnownPeople } from "./fa
 import { photoPath, savePhoto, visionHealth } from "./vision.js";
 import { templateReview, weeklyFacts, writeReview } from "./review.js";
 import { captureReturned, finishLink, startLink } from "./pay.js";
+import { synthesize, ttsEnabled } from "./tts.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(process.env.DB_PATH ?? "data/carecircle.db");
@@ -44,6 +45,7 @@ setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (v.eve
 app.post("/api/agent/chat", rateLimit);
 app.post("/api/vision/photo", rateLimit);
 app.post("/api/pay/link", rateLimit);
+app.post("/api/tts", rateLimit);
 
 // ---- MCP endpoint: Streamable HTTP with sessions ----
 // Sessions let the server send requests back to the client in the middle of a
@@ -149,6 +151,17 @@ app.get("/api/review/weekly", async (req, res) => {
     res.status(500).json({ ok: false, error: e?.message ?? "review failed" });
   }
 });
+// Natural voice for the speaker (Amazon Polly). 204 tells the browser to use its own voice instead.
+app.get("/api/tts", (_req, res) => res.json({ enabled: ttsEnabled() }));
+app.post("/api/tts", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text : "";
+  const kind = req.body?.voice === "male" ? "male" : "female";
+  if (!text.trim()) return res.status(400).end();
+  const audio = await synthesize(text, kind).catch(() => null);
+  if (!audio) return res.status(204).end();
+  res.set("Cache-Control", "no-store").type("audio/mpeg").send(audio);
+});
+
 // ---- Safe Pay: PayPal (sandbox) sends people back here after approving in PayPal ----
 const backToApp = (res: express.Response, note: string) => res.redirect(`/#/try?paypal=${encodeURIComponent(note)}`);
 app.get("/api/pay/return", async (req, res) => {

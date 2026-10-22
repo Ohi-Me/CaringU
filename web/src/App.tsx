@@ -215,6 +215,71 @@ function Home() {
   );
 }
 
+// ---------------- Voice ----------------
+// Amazon Polly on the server when available (natural voices); otherwise the browser's best voice.
+// CaringU speaks in one warm female voice; a family member's own words ("Message from Ravi: …")
+// are read in a voice that matches them.
+type VoiceKind = "female" | "male";
+const GENDER: Record<string, VoiceKind> = {};
+let pollyOn: boolean | null = null;
+let playing: HTMLAudioElement | null = null;
+let voiceToken = 0;
+function stopVoice() {
+  voiceToken++;
+  playing?.pause(); playing = null;
+  try { speechSynthesis.cancel(); } catch { /* no speech support */ }
+}
+function browserVoice(kind: VoiceKind) {
+  if (!("speechSynthesis" in window)) return null;
+  const female = /female|neerja|swara|heera|kajal|aditi|zira|aria|jenny|samantha|sonia|libby|natasha/i;
+  const male = /\bmale|prabhat|madhur|ravi|hemant|guy|david|mark|ryan|thomas|william|daniel/i;
+  const score = (v: SpeechSynthesisVoice) => (/natural|neural|online/i.test(v.name) ? 4 : 0) + (/en-IN/i.test(v.lang) ? 2 : /^en/i.test(v.lang) ? 1 : -9)
+    + ((kind === "female" ? female : male).test(v.name) ? 3 : (kind === "female" ? male : female).test(v.name) ? -3 : 0);
+  return speechSynthesis.getVoices().slice().sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+function voiceParts(text: string): { text: string; kind: VoiceKind }[] {
+  const parts: { text: string; kind: VoiceKind }[] = [];
+  const re = /(Message from (\w+): |(\w+) shared a photo: )/g;
+  let at = 0, who: string | null = null, m: RegExpExecArray | null;
+  const push = (t: string, k: VoiceKind) => { if (t.trim()) parts.push({ text: t.trim(), kind: k }); };
+  while ((m = re.exec(text))) {
+    push(text.slice(at, m.index), who ? GENDER[who] ?? "female" : "female");
+    push(m[1], "female");
+    who = m[2] ?? m[3]; at = m.index + m[1].length;
+  }
+  push(text.slice(at), who ? GENDER[who] ?? "female" : "female");
+  return parts;
+}
+async function sayPart(text: string, kind: VoiceKind, token: number) {
+  if (pollyOn !== false) {
+    try {
+      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: kind }) });
+      if (r.status === 200) {
+        const url = URL.createObjectURL(await r.blob());
+        pollyOn = true;
+        if (token !== voiceToken) return;
+        const a = new Audio(url);
+        playing = a;
+        await new Promise<void>((done) => { a.onended = () => done(); a.onerror = () => done(); a.play().catch(() => done()); });
+        URL.revokeObjectURL(url);
+        return;
+      }
+      pollyOn = false;
+    } catch { pollyOn = false; }
+  }
+  if (!("speechSynthesis" in window) || token !== voiceToken) return;
+  await new Promise<void>((done) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95;
+    const v = browserVoice(kind); if (v) u.voice = v;
+    // Some browsers never fire onend (no voices, background tab); don't wait forever.
+    const t = setTimeout(done, 2000 + text.split(/\s+/).length * 450);
+    u.onend = () => { clearTimeout(t); done(); };
+    u.onerror = () => { clearTimeout(t); done(); };
+    speechSynthesis.speak(u);
+  });
+}
+
 // ---------------- Try it (the live demo) ----------------
 function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => void }) {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -242,7 +307,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
   activeRef.current = active;
 
   // Leaving the page silences her device.
-  useEffect(() => { if (!active) { speechSynthesis?.cancel(); recRef.current?.stop(); } }, [active]);
+  useEffect(() => { if (!active) { stopVoice(); recRef.current?.stop(); } }, [active]);
   // Re-checked after every reply, so the status reflects whether the model's credentials work right now.
   useEffect(() => { fetch("/api/agent/mode").then((r) => r.json()).then(setMode).catch(() => setMode(null)); }, [tick]);
   useEffect(() => {
@@ -250,20 +315,25 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
     load(); const t = setInterval(load, 30000); return () => clearInterval(t);
   }, [tick]);
 
+  // keepState: we are mid-request (e.g. waiting for a yes/no), so return to "thinking", not idle.
   const speak = useCallback((text: string, keepState = false) => {
-    if (!voiceOn || !("speechSynthesis" in window)) { if (!keepState) setOrb("idle"); return; }
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.95;
-    // Some browsers never fire onend (no voices, background tab); don't let the device get stuck "speaking".
-    // keepState: we are mid-request (e.g. waiting for a yes/no), so return to "thinking", not idle.
     const after: Orb = keepState ? "thinking" : "idle";
-    const fallback = setTimeout(() => setOrb((o) => (o === "speaking" ? after : o)), 1500 + text.split(/\s+/).length * 450);
-    u.onend = () => { clearTimeout(fallback); setOrb(after); };
-    u.onerror = () => { clearTimeout(fallback); setOrb(after); };
+    if (!voiceOn) { if (!keepState) setOrb("idle"); return; }
+    stopVoice();
+    const token = voiceToken;
     setOrb("speaking");
-    speechSynthesis.speak(u);
+    (async () => {
+      for (const p of voiceParts(text)) { if (token !== voiceToken) return; await sayPart(p.text, p.kind, token); }
+      if (token === voiceToken) setOrb((o) => (o === "speaking" ? after : o));
+    })();
   }, [voiceOn]);
+  const hush = () => { stopVoice(); setOrb((o) => (o === "speaking" ? "idle" : o)); };
+  // Who is male or female in her care circle, so their own words get a matching voice.
+  useEffect(() => {
+    callTool<any>("get_family_digest", {}, true).then((r) => {
+      if (r.ok) for (const p of r.data.people ?? []) GENDER[String(p.name).split(" ")[0]] = /\b(son|husband|brother|father|grandson|nephew)\b/i.test(p.relation ?? "") ? "male" : "female";
+    });
+  }, []);
   const speakRef = useRef(speak);
   speakRef.current = speak;
 
@@ -352,7 +422,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
     const a = deviceAskRef.current;
     if (!a) return;
     setDeviceAsk(null);
-    speechSynthesis?.cancel();
+    stopVoice(); setOrb("thinking");
     await fetch(`/api/agent/elicit/${a.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approve }) }).catch(() => {});
   };
 
@@ -360,7 +430,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
     const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     if (!SR) { alert("Voice input needs Chrome or Edge. You can type instead."); return; }
     if (orb === "listening") { recRef.current?.stop(); return; }
-    speechSynthesis?.cancel();
+    stopVoice();
     const rec = new SR();
     rec.lang = "en-IN"; rec.interimResults = true; rec.maxAlternatives = 1;
     let heard = "";
@@ -384,7 +454,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
 
   const reset = async (time?: string) => {
     if (!confirm(time ? `Reset all sample data and start the demo day at ${time}?` : "Reset all sample data using the real current time?")) return;
-    speechSynthesis?.cancel();
+    hush();
     await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(time ? { time } : {}) });
     setTurns([]); clearEvents(); setTick((x) => x + 1);
   };
@@ -454,7 +524,7 @@ function TryIt({ active, clearEvents }: { active: boolean; clearEvents: () => vo
                 <option>Asha (voice)</option><option>Ravi (son)</option><option>Neha (daughter)</option>
               </select>
             </label>
-            <label className="toggle"><input type="checkbox" checked={voiceOn} onChange={(e) => { setVoiceOn(e.target.checked); speechSynthesis?.cancel(); }} /> Speak replies</label>
+            <label className="toggle"><input type="checkbox" checked={voiceOn} onChange={(e) => { setVoiceOn(e.target.checked); hush(); }} /> Speak replies</label>
           </div>
 
           <button className={`orb orb-${orb}`} onClick={listen} aria-label={orb === "listening" ? "Stop listening" : "Tap to speak"}>
