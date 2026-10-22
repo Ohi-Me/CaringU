@@ -64,8 +64,13 @@ systemctl daemon-reload && systemctl enable --now caringu-vision caringu
 # HTTPS via Caddy + sslip.io hostname derived from the public IP (IMDSv2).
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
 IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
-HOST="${IP//./-}.sslip.io"
-echo "PUBLIC_URL=https://${HOST}" >/opt/caringu/caringu.env && chown caringu /opt/caringu/caringu.env && chmod 600 /opt/caringu/caringu.env
+# PUBLIC_HOST can be set above this script (e.g. for an Elastic IP attached right after launch).
+HOST="${PUBLIC_HOST:-${IP//./-}.sslip.io}"
+# EXTRA_ENV (optional, set above this script) holds sandbox keys; it lands only in this root-readable file.
+set +x  # never trace the keys into the boot log
+printf 'PUBLIC_URL=https://%s\nTTS_PROVIDER=polly\n%s\n' "$HOST" "${EXTRA_ENV:-}" >/opt/caringu/caringu.env && chown caringu /opt/caringu/caringu.env && chmod 600 /opt/caringu/caringu.env
+unset EXTRA_ENV
+set -x
 systemctl restart caringu
 curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${CARCH}.tar.gz" | tar -xz -C /usr/local/bin caddy
 mkdir -p /etc/caddy && printf '%s {\n  reverse_proxy 127.0.0.1:8787 {\n    flush_interval -1\n  }\n}\n' "$HOST" >/etc/caddy/Caddyfile
