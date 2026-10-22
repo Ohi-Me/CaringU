@@ -2,6 +2,8 @@
 
 **Ask before you act.** CaringU is a voice-first companion that sits between an older adult and a risky moment (an extra pill, a scam call, a QR code that "pays you a refund", a fall) and brings the family (her *care circle*) in, fast.
 
+**Live demo:** https://3-238-123-241.sslip.io (sample data; open **Try it**).
+
 At its core is a self-hosted **MCP server** (spec 2025-11-25, Streamable HTTP) and a voice experience whose clients are real MCP clients. Around it: **Amazon Bedrock** or **NVIDIA Nemotron** (on Nebius) for conversation, **OpenCV 5** for the camera checks, and **PayPal** (sandbox) for bill payments. Every decision that could hurt someone is made by fixed, tested rules, not by a model.
 
 ## The problem
