@@ -38,6 +38,8 @@ WorkingDirectory=/opt/caringu/app/server
 Environment=PORT=8787 DB_PATH=/opt/caringu/data/caringu.db WEB_DIST=/opt/caringu/app/web/dist
 Environment=AGENT_MODE=bedrock AWS_REGION=us-east-1 BEDROCK_MODEL_ID=amazon.nova-pro-v1:0 NODE_NO_WARNINGS=1
 Environment=VISION_URL=http://127.0.0.1:8790 PHOTO_DIR=/opt/caringu/data/photos
+# PUBLIC_URL (and any sandbox keys added later) live here, not in the unit file.
+EnvironmentFile=-/opt/caringu/caringu.env
 ExecStart=/usr/local/bin/node --import tsx src/index.ts
 Restart=always
 [Install]
@@ -63,6 +65,8 @@ systemctl daemon-reload && systemctl enable --now caringu-vision caringu
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
 IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
 HOST="${IP//./-}.sslip.io"
+echo "PUBLIC_URL=https://${HOST}" >/opt/caringu/caringu.env && chown caringu /opt/caringu/caringu.env && chmod 600 /opt/caringu/caringu.env
+systemctl restart caringu
 curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${CARCH}.tar.gz" | tar -xz -C /usr/local/bin caddy
 mkdir -p /etc/caddy && printf '%s {\n  reverse_proxy 127.0.0.1:8787 {\n    flush_interval -1\n  }\n}\n' "$HOST" >/etc/caddy/Caddyfile
 cat >/etc/systemd/system/caddy.service <<'UNIT'
@@ -71,6 +75,7 @@ Description=Caddy
 After=network-online.target
 [Service]
 ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile
+Environment=HOME=/root XDG_DATA_HOME=/var/lib/caddy XDG_CONFIG_HOME=/etc/caddy
 Restart=always
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 [Install]
